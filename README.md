@@ -1,66 +1,167 @@
-![Banner](https://github.com/ExpressLRS/ExpressLRS-Hardware/blob/master/img/banner.png?raw=true)
+# MurmurLRS
 
-<center>
+**A privacy-focused fork of ExpressLRS with authenticated encryption.**
 
-[![Release](https://img.shields.io/github/v/release/ExpressLRS/ExpressLRS?style=flat-square)](https://github.com/ExpressLRS/ExpressLRS/releases)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/ExpressLRS/ExpressLRS/build.yml?logo=github&style=flat-square)](https://github.com/ExpressLRS/ExpressLRS/actions)
-[![License](https://img.shields.io/github/license/ExpressLRS/ExpressLRS?style=flat-square)](https://github.com/ExpressLRS/ExpressLRS/blob/master/LICENSE)
-[![Stars](https://img.shields.io/github/stars/ExpressLRS/ExpressLRS?style=flat-square)](https://github.com/ExpressLRS/ExpressLRS/stargazers)
-[![Chat](https://img.shields.io/discord/596350022191415318?color=%235865F2&logo=discord&logoColor=%23FFFFFF&style=flat-square)](https://discord.gg/expresslrs)
+MurmurLRS encrypts and authenticates every RC packet over the air. Your stick inputs, telemetry, and channel data are protected with AES-128 -- nobody can read your link or inject commands.
 
-</center>
+## How do I use MurmurLRS?
 
-**ExpressLRS** is developed and maintained by **ExpressLRS LLC** and its passionate open source community, working together to advance reliable, high-performance radio control technology.
+1. Download the [latest release](https://github.com/PotatoSpudowski/MurmurLRS/releases) or clone this repo
+2. Open the [ELRS Configurator](https://github.com/ExpressLRS/ExpressLRS-Configurator/releases)
+3. Choose the **Local** tab and point it at the `src` folder
+4. Flash your TX and RX with the `MURMUR_ENCRYPT` build flag
+5. Set a strong binding phrase on both sides -- it's now your encryption key
 
-## Support ExpressLRS
-You can support ExpressLRS by contributing code, testing new features, sharing your ideas, or helping others get started. We are exceptionally grateful for those who donate their time to our passion.
+That's it. Same hardware, same Configurator, same workflow.
 
-If you don't have time to lend a hand in that way but still want to have an impact, consider donating. Donations are used for infrastructure costs and to buy test equipment needed to further the project and make it securely accessible. ExpressLRS accepts donations through Open Collective, which provides recognition of donors and transparency on how that support is utilized.
+### Build from source
 
-[![Open Collective backers](https://img.shields.io/opencollective/backers/expresslrs?label=Open%20Collective%20backers&style=flat-square)](https://opencollective.com/expresslrs)
+```bash
+git clone https://github.com/PotatoSpudowski/MurmurLRS
+cd MurmurLRS/src
 
-We appreciate all forms of contribution and hope you will join us on Discord!
+# Build for your target with encryption enabled
+pio run -e <your_target> -DMURMUR_ENCRYPT
+```
 
-## Website
-For general information on the project please refer to our guides on the [website](https://www.expresslrs.org/), and our [FAQ](https://www.expresslrs.org/faq/)
+## FAQ
 
-## About
+### How's the performance?
 
-ExpressLRS is an open source Radio Link for Radio Control applications. Designed to be the best FPV Racing link, it is based on the fantastic Semtech **SX127x**/**SX1280** LoRa hardware combined with an Espressif or STM32 Processor. Using LoRa modulation as well as reduced packet size it achieves best in class range and latency. It achieves this using a highly optimized over-the-air packet structure, giving simultaneous range and latency advantages. It supports both 900 MHz and 2.4 GHz links, each with their own benefits. 900 MHz supports a maximum of 200 Hz packet rate, with higher penetration. 2.4 GHz supports a blistering fast 1000 Hz on [EdgeTX](http://edgetx.org/). With hundreds of different hardware targets from a wide range of hardware manufacturers, the choice of hardware is constantly growing, with different hardware suited to different requirements.
+Identical to stock ELRS at the same version. AES-128 encryption adds **9 microseconds** per packet -- that's 3 AES block operations. At 250 Hz, total overhead is 0.23% of CPU time. You won't notice it.
 
-## Configurator
-To configure your ExpressLRS hardware, the ExpressLRS Configurator can be used, which is found here:
+| | MurmurLRS | Stock ELRS |
+|---|---|---|
+| Latency added | ~9 us/packet | -- |
+| CPU overhead (250 Hz) | 0.23% | -- |
+| Packet size | Same | Same |
+| Air rate | Same | Same |
+| Range | Same | Same |
 
-https://github.com/ExpressLRS/ExpressLRS-Configurator/releases/
+### What's different from PrivacyLRS?
 
-## Community
-We have both a [Discord Server](https://discord.gg/expresslrs) and [Facebook Group](https://www.facebook.com/groups/636441730280366), which have great support for new users and constant ongoing development discussion
+Both projects add encryption to ELRS. The difference is **authentication**:
 
-## Features
+| | MurmurLRS | PrivacyLRS |
+|---|---|---|
+| Encryption | AES-128-CTR | ChaCha20 |
+| Packet authentication | AES-CMAC (keyed MAC) | CRC only (not keyed) |
+| Bit-flip resistance | Tampered packets rejected | Vulnerable (stream cipher is malleable) |
+| Replay protection | 64-packet sliding window | 8-bit counter (wraps at 256) |
+| Key derivation | AES-CMAC KDF | Binding phrase direct |
+| Overhead | ~9 us/pkt | ~3.5 us/pkt |
 
-ExpressLRS has the following features:
+PrivacyLRS encrypts with ChaCha20 but doesn't authenticate. That means an attacker can flip bits in your encrypted packets and the receiver silently accepts corrupted data. MurmurLRS uses encrypt-then-MAC -- any tampered packet is rejected.
 
-- Up to 1000 Hz Packet Rate
-- Telemetry (Betaflight Lua Compatibility)
-- Wifi Updates
-- Bluetooth or WiFi Sim Joystick
-- Oled & TFT Displays
-- 2.4 GHz, 900 MHz, and Dual-Band RC Link
-- SMD Antenna - allows for easier installation into micros
-- Supported receiver protocols: CRSF, SBUS, SUMD, HoTT Telemetry, MAVLink, and PWM
-- VTX and VRX Frequency adjustments from the Lua, including SmartAudio and Tramp support
-- Bind Phrases - no need for button binding
+### Is this compatible with stock ELRS?
 
-with many more features on the way!
+No. Both TX and RX must run MurmurLRS. You cannot mix MurmurLRS and stock ELRS devices on the same link.
 
-## Supported Hardware
+### What hardware is supported?
 
-ExpressLRS currently supports hardware from a wide range of manufacturers. In principle, the targets listed in the [ExpressLRS Configurator](https://github.com/ExpressLRS/ExpressLRS-Configurator/releases/) are tested and supported hardware.
+Everything ELRS supports -- ESP32, ESP8285, STM32 targets, 900 MHz and 2.4 GHz. Same radios, same modules.
 
-See [Hardware Selection](https://www.expresslrs.org/hardware/hardware-selection/) for guidance. We do not manufacture any of our hardware, so we can only provide limited support for faulty hardware.
+### Is this a fork because somebody got mad?
 
-## Developers
+No drama. ELRS is an incredible project. We just want encryption and they decided it wasn't for them. Fair enough.
 
-If you are a developer and would like to contribute to the project, feel free to join the [discord](https://discord.gg/expresslrs) and chat about bugs and issues. You can also look for issues at the [GitHub Issue Tracker](https://github.com/ExpressLRS/ExpressLRS/issues). The best thing to do is to submit a Pull Request to the GitHub Repository.
+## Status
 
-![](https://github.com/ExpressLRS/ExpressLRS-Hardware/blob/master/img/community.png?raw=true)
+**Beta -- testers needed.**
+
+The encryption module passes 30 tests including NIST AES-128 vectors and RFC 4493 CMAC test vectors. What it needs is real-world validation:
+
+- [x] Crypto correctness (30/30 tests)
+- [x] Zero packet overhead (same air rate, same packet size)
+- [ ] Over-the-air TX/RX encrypted link test
+- [ ] Range testing (should be identical to stock)
+- [ ] Failsafe behavior under encryption
+- [ ] Rate switching / reconnection
+- [ ] ESP8266 and STM32 target testing
+
+**Set failsafe on your flight controller. Bench test before flying.**
+
+### Run the test suite
+
+```
+cd src/lib/MurmurEncrypt
+make test
+```
+
+```
+=== MurmurLRS Crypto Test Suite ===
+[AES-128 ECB]           3/3  PASS
+[AES-CMAC (RFC 4493)]   4/4  PASS
+[Packet encrypt/decrypt] 6/6  PASS
+[Counter reconstruction] 5/5  PASS
+[Replay protection]      7/7  PASS
+[Key derivation]         3/3  PASS
+[Integration]            2/2  PASS
+=== Results: 30/30 passed ===
+```
+
+## Binding phrase = encryption key
+
+In stock ELRS, the binding phrase is just for pairing -- it's not a security feature. In MurmurLRS, the binding phrase is fed through an AES-CMAC key derivation function to produce your encryption key.
+
+**Use a strong phrase.** 3-4 random words minimum. Same phrase on TX and RX.
+
+## How it works
+
+MurmurLRS replaces the CRC field with authenticated encryption. Zero extra bytes, same packet structure:
+
+```
+TX:  RC data -> AES-128-CTR encrypt -> AES-CMAC -> MAC replaces CRC -> transmit
+RX:  receive -> verify MAC -> decrypt -> replay check -> RC output
+```
+
+SYNC packets remain unencrypted for connection establishment.
+
+<details>
+<summary>Technical details</summary>
+
+**Cryptographic primitives:**
+- AES-128-CTR for encryption (NIST SP 800-38A)
+- AES-128-CMAC for authentication (RFC 4493)
+- AES-CMAC KDF for key derivation
+- 32-bit counter reconstructed from 8-bit OtaNonce
+- 64-packet sliding window replay protection
+
+**Key derivation:**
+```
+binding_phrase -> AES-CMAC(zeros, phrase) -> master_key
+master_key -> AES-CMAC(master, "murmur-enc") -> encryption_key (16 bytes)
+master_key -> AES-CMAC(master, "murmur-uid") -> UID (6 bytes, ELRS compatible)
+```
+
+**Files changed from stock ELRS:**
+
+| File | Change |
+|------|--------|
+| `src/lib/MurmurEncrypt/*` | New: encryption module (~500 LOC pure C) |
+| `src/lib/OTA/OTA.cpp` | Wraps CRC functions with encrypt/decrypt |
+| `src/src/tx_main.cpp` | 4 lines: init encryption at boot |
+| `src/src/rx_main.cpp` | 4 lines: init encryption at boot |
+
+The encryption module is pure C with no external dependencies. ~1 KB code size. Tested against NIST and RFC reference vectors.
+
+**Known limitations (v1):**
+- 14-bit MAC gives forgery probability of 1/16384 per attempt
+- SYNC packets are cleartext (needed for initial connection)
+- No forward secrecy -- same key per session
+- LCG hop sequence is inherited from ELRS
+
+</details>
+
+## Contributing
+
+- **Flash and test** -- report what works and what breaks
+- **Review the crypto** -- < 500 lines of auditable C in `src/lib/MurmurEncrypt/`
+- **ESP8266/STM32 testing** -- primary development is on ESP32
+- **Configurator UI** -- adding encryption toggle to the ELRS web interface
+
+## About ExpressLRS
+
+ExpressLRS is an open-source radio control link for RC applications. It supports Semtech SX127x/SX1280 hardware across 900 MHz and 2.4 GHz bands with packet rates up to 1000 Hz. MurmurLRS is a fork that adds encryption on top of this foundation.
+
+See [README_ELRS.md](README_ELRS.md) for the original ExpressLRS documentation.

@@ -1418,6 +1418,11 @@ void setup()
     DBGLN("Initialised devices");
 
     setupBindingFromConfig();
+#if defined(MURMUR_ENCRYPT)
+    extern void MurmurInitFromUid(const uint8_t uid[6]);
+    MurmurInitFromUid(UID);
+    DBGLN("MurmurLRS: encryption active");
+#endif
     FHSSrandomiseFHSSsequence(uidMacSeedGet());
 
     Radio.RXdoneCallback = &RXdoneISR;

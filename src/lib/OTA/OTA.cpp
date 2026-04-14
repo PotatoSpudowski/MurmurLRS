@@ -12,6 +12,105 @@
 
 #include <cassert>
 
+// ==================== MurmurLRS Encryption ====================
+#if defined(MURMUR_ENCRYPT)
+extern "C" {
+#include "murmur.h"
+}
+
+static uint8_t murmur_key[16];
+static uint32_t murmur_tx_counter;
+static uint32_t murmur_rx_expected;
+static murmur_replay_t murmur_replay_state;
+static bool murmur_key_ready = false;
+
+static ValidatePacketCrc_t OriginalValidateCrc;
+static GeneratePacketCrc_t OriginalGenerateCrc;
+
+void MurmurInitFromUid(const uint8_t uid[6])
+{
+    uint8_t zeros[16] = {0};
+    uint8_t master[16];
+    murmur_cmac(zeros, uid, 6, master);
+    murmur_cmac(master, (const uint8_t *)"murmur-enc", 10, murmur_key);
+
+    murmur_tx_counter = 0;
+    murmur_rx_expected = 0;
+    murmur_replay_init(&murmur_replay_state);
+    murmur_key_ready = true;
+}
+
+static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktPtr)
+{
+    uint8_t ptype = ((uint8_t*)otaPktPtr)[0] & 0x03;
+
+    if (ptype == PACKET_TYPE_SYNC || !murmur_key_ready) {
+        OriginalGenerateCrc(otaPktPtr);
+        return;
+    }
+
+    uint8_t *payload = ((uint8_t*)otaPktPtr) + 1;
+
+    if (OtaIsFullRes) {
+        uint8_t payload_len = OTA8_CRC_CALC_LEN - 1;
+        uint16_t mac = murmur_encrypt_packet(murmur_key, murmur_tx_counter,
+                                             ptype, payload, payload_len, 16);
+        otaPktPtr->full.crc = mac;
+    } else {
+        otaPktPtr->std.crcHigh = 0;
+        uint8_t payload_len = OTA4_CRC_CALC_LEN - 1;
+        uint16_t mac = murmur_encrypt_packet(murmur_key, murmur_tx_counter,
+                                             ptype, payload, payload_len, 14);
+        otaPktPtr->std.crcHigh = (mac >> 8);
+        otaPktPtr->std.crcLow = mac & 0xFF;
+    }
+
+    murmur_tx_counter++;
+}
+
+static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktPtr)
+{
+    uint8_t ptype = ((uint8_t*)otaPktPtr)[0] & 0x03;
+
+    if (ptype == PACKET_TYPE_SYNC || !murmur_key_ready) {
+        return OriginalValidateCrc(otaPktPtr);
+    }
+
+    uint8_t *payload = ((uint8_t*)otaPktPtr) + 1;
+    uint16_t received_mac;
+    uint8_t payload_len;
+    uint8_t mac_bits;
+
+    if (OtaIsFullRes) {
+        received_mac = otaPktPtr->full.crc;
+        payload_len = OTA8_CRC_CALC_LEN - 1;
+        mac_bits = 16;
+    } else {
+        received_mac = ((uint16_t)otaPktPtr->std.crcHigh << 8) | otaPktPtr->std.crcLow;
+        otaPktPtr->std.crcHigh = 0;
+        payload_len = OTA4_CRC_CALC_LEN - 1;
+        mac_bits = 14;
+    }
+
+    uint32_t counter = murmur_reconstruct_counter(murmur_rx_expected, OtaNonce);
+    uint32_t candidates[3] = { counter, counter + 256, (counter >= 256) ? counter - 256 : 0xFFFFFFFF };
+
+    for (int i = 0; i < 3; i++) {
+        if (candidates[i] == 0xFFFFFFFF) continue;
+        if (murmur_decrypt_packet(murmur_key, candidates[i], ptype,
+                                  payload, payload_len, received_mac, mac_bits)) {
+            if (!murmur_replay_check(&murmur_replay_state, candidates[i]))
+                return false;
+            murmur_rx_expected = candidates[i] + 1;
+            return true;
+        }
+    }
+
+    return false;
+}
+#endif // MURMUR_ENCRYPT
+// ================ End MurmurLRS Encryption ================
+
 static_assert(sizeof(OTA_Packet4_s) == OTA4_PACKET_SIZE, "OTA4 packet stuct is invalid!");
 static_assert(sizeof(OTA_Packet8_s) == OTA8_PACKET_SIZE, "OTA8 packet stuct is invalid!");
 
@@ -546,6 +645,13 @@ void OtaUpdateSerializers(OtaSwitchMode_e const switchMode, uint8_t packetSize)
     }
 
     OtaSwitchModeCurrent = switchMode;
+
+#if defined(MURMUR_ENCRYPT)
+    OriginalValidateCrc = OtaValidatePacketCrc;
+    OriginalGenerateCrc = OtaGeneratePacketCrc;
+    OtaValidatePacketCrc = &MurmurValidatePacketCrc;
+    OtaGeneratePacketCrc = &MurmurGeneratePacketCrc;
+#endif
 }
 
 void OtaPackAirportData(OTA_Packet_s * const otaPktPtr, FIFO<AP_MAX_BUF_LEN> *inputBuffer)
