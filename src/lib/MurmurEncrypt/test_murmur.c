@@ -1,14 +1,14 @@
 /*
  * test_murmur.c — Test suite for MurmurLRS encryption module
  *
- * Tests against NIST FIPS 197 AES-128, RFC 4493 AES-CMAC,
+ * Tests against ASCON-128 AEAD and ASCON-XOF,
  * plus encrypt/decrypt roundtrips, counter reconstruction,
  * replay protection, and key derivation.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "aes128.h"
+#include "ascon.h"
 #include "murmur.h"
 
 static int tests_run = 0;
@@ -30,98 +30,79 @@ static void hex_to_bytes(const char *hex, uint8_t *out, int len)
 }
 
 /* ================================================================== */
-/*  AES-128 ECB (FIPS 197)                                             */
+/*  ASCON-128 AEAD                                                     */
 /* ================================================================== */
 
-static void test_aes128_fips197(void)
+static void test_ascon128_basic(void)
 {
-    TEST("AES-128 ECB: FIPS 197 test vector");
-    uint8_t key[16], plain[16], cipher[16], result[16];
-    hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c", key, 16);
-    hex_to_bytes("6bc1bee22e409f96e93d7e117393172a", plain, 16);
-    hex_to_bytes("3ad77bb40d7a3660a89ecaf32466ef97", cipher, 16);
-    aes128_encrypt(key, plain, result);
-    ASSERT_MEM_EQ(result, cipher, 16, "ciphertext mismatch");
+    TEST("ASCON-128 AEAD: official test vector (empty AD/P)");
+    uint8_t key[16], nonce[16], ciphertext[16];
+    uint8_t expected_tag[16];
+    hex_to_bytes("000102030405060708090a0b0c0d0e0f", key, 16);
+    hex_to_bytes("000102030405060708090a0b0c0d0e0f", nonce, 16);
+    hex_to_bytes("e355159f292911f794cb1432a0103a8a", expected_tag, 16);
+
+    ascon128_encrypt(key, nonce, NULL, 0, NULL, 0, ciphertext);
+    ASSERT_MEM_EQ(ciphertext, expected_tag, 16, "tag mismatch");
     PASS();
 }
 
-static void test_aes128_fips197_v2(void)
+static void test_ascon128_roundtrip(void)
 {
-    TEST("AES-128 ECB: FIPS 197 test vector 2");
-    uint8_t key[16], plain[16], cipher[16], result[16];
-    hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c", key, 16);
-    hex_to_bytes("ae2d8a571e03ac9c9eb76fac45af8e51", plain, 16);
-    hex_to_bytes("f5d3d58503b9699de785895a96fdbaaf", cipher, 16);
-    aes128_encrypt(key, plain, result);
-    ASSERT_MEM_EQ(result, cipher, 16, "ciphertext mismatch");
-    PASS();
-}
+    TEST("ASCON-128 AEAD: encryption/decryption roundtrip");
+    uint8_t key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t nonce[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,42};
+    uint8_t ad[] = "associated data";
+    uint8_t m[] = "this is a message";
+    uint8_t c[sizeof(m) + 16];
+    uint8_t decrypted[sizeof(m)];
 
-static void test_aes128_zero(void)
-{
-    TEST("AES-128 ECB: all-zero key and plaintext");
-    uint8_t key[16], plain[16], result[16], expected[16];
-    memset(key, 0, 16);
-    memset(plain, 0, 16);
-    hex_to_bytes("66e94bd4ef8a2c3b884cfa59ca342b2e", expected, 16);
-    aes128_encrypt(key, plain, result);
-    ASSERT_MEM_EQ(result, expected, 16, "ciphertext mismatch");
+    ascon128_encrypt(key, nonce, ad, strlen((char*)ad), m, strlen((char*)m), c);
+    int res = ascon128_decrypt(key, nonce, ad, strlen((char*)ad), c, strlen((char*)m) + 16, decrypted);
+
+    ASSERT_EQ(res, 0, "decryption failed");
+    ASSERT_MEM_EQ(decrypted, m, strlen((char*)m), "plaintext mismatch");
     PASS();
 }
 
 /* ================================================================== */
-/*  AES-CMAC (RFC 4493)                                                */
+/*  ASCON-XOF                                                          */
 /* ================================================================== */
 
-static void test_cmac_empty(void)
+static void test_ascon_xof_kat(void)
 {
-    TEST("AES-CMAC: RFC 4493 example 1 (empty message)");
-    uint8_t key[16], mac[16], expected[16];
-    hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c", key, 16);
-    hex_to_bytes("bb1d6929e95937287fa37d129b756746", expected, 16);
-    murmur_cmac(key, NULL, 0, mac);
-    ASSERT_MEM_EQ(mac, expected, 16, "MAC mismatch");
+    TEST("ASCON-XOF: official test vectors");
+    uint8_t hash[32];
+    uint8_t expected_empty[32];
+    /* ASCON-XOF empty message KAT */
+    hex_to_bytes("5d4cbde6350ea4c174bd65b5b332f8408f99740b81aa02735eaefbcf0ba0339e", expected_empty, 32);
+    ascon_xof(NULL, 0, hash, 32);
+    ASSERT_MEM_EQ(hash, expected_empty, 32, "empty message KAT mismatch");
+
+    /* ASCON-XOF 0x00 message KAT */
+    uint8_t msg_00 = 0x00;
+    uint8_t expected_00[32];
+    hex_to_bytes("b2edbb27ac8397a55bc83d137c151de9ede048338fe907f0d3629e717846fedc", expected_00, 32);
+    ascon_xof(&msg_00, 1, hash, 32);
+    ASSERT_MEM_EQ(hash, expected_00, 32, "message 0x00 KAT mismatch");
     PASS();
 }
 
-static void test_cmac_16(void)
+static void test_ascon_xof_logic(void)
 {
-    TEST("AES-CMAC: RFC 4493 example 2 (16 bytes)");
-    uint8_t key[16], msg[16], mac[16], expected[16];
-    hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c", key, 16);
-    hex_to_bytes("6bc1bee22e409f96e93d7e117393172a", msg, 16);
-    hex_to_bytes("070a16b46b4d4144f79bdd9dd04a287c", expected, 16);
-    murmur_cmac(key, msg, 16, mac);
-    ASSERT_MEM_EQ(mac, expected, 16, "MAC mismatch");
-    PASS();
-}
+    TEST("ASCON-XOF: deterministic and variable length");
+    uint8_t h1[32], h2[32], h3[64];
+    ascon_xof((uint8_t*)"test", 4, h1, 32);
+    ascon_xof((uint8_t*)"test", 4, h2, 32);
+    ascon_xof((uint8_t*)"test", 4, h3, 64);
 
-static void test_cmac_40(void)
-{
-    TEST("AES-CMAC: RFC 4493 example 3 (40 bytes)");
-    uint8_t key[16], mac[16], expected[16], msg[40];
-    hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c", key, 16);
-    hex_to_bytes("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411", msg, 40);
-    hex_to_bytes("dfa66747de9ae63030ca32611497c827", expected, 16);
-    murmur_cmac(key, msg, 40, mac);
-    ASSERT_MEM_EQ(mac, expected, 16, "MAC mismatch");
-    PASS();
-}
-
-static void test_cmac_64(void)
-{
-    TEST("AES-CMAC: RFC 4493 example 4 (64 bytes)");
-    uint8_t key[16], mac[16], expected[16], msg[64];
-    hex_to_bytes("2b7e151628aed2a6abf7158809cf4f3c", key, 16);
-    hex_to_bytes("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710", msg, 64);
-    hex_to_bytes("51f0bebf7e3b9d92fc49741779363cfe", expected, 16);
-    murmur_cmac(key, msg, 64, mac);
-    ASSERT_MEM_EQ(mac, expected, 16, "MAC mismatch");
+    ASSERT_MEM_EQ(h1, h2, 32, "should be deterministic");
+    ASSERT_MEM_EQ(h3, h1, 32, "first 32 bytes of 64-byte output should match 32-byte output");
     PASS();
 }
 
 /* ================================================================== */
-/*  Encrypt / decrypt                                                  */
+/*  Packet encrypt / decrypt                                                  */
 /* ================================================================== */
 
 static void test_roundtrip_pkt4(void)
@@ -405,13 +386,14 @@ static void test_forgery_rejected(void)
 
 int main(void)
 {
-    printf("\n=== MurmurLRS Crypto Test Suite ===\n\n");
+    printf("\n=== MurmurLRS Crypto Test Suite (ASCON) ===\n\n");
 
-    printf("[AES-128 ECB]\n");
-    test_aes128_fips197(); test_aes128_fips197_v2(); test_aes128_zero();
+    printf("[ASCON-128 AEAD]\n");
+    test_ascon128_basic(); test_ascon128_roundtrip();
 
-    printf("\n[AES-CMAC (RFC 4493)]\n");
-    test_cmac_empty(); test_cmac_16(); test_cmac_40(); test_cmac_64();
+    printf("\n[ASCON-XOF]\n");
+    test_ascon_xof_kat();
+    test_ascon_xof_logic();
 
     printf("\n[Packet encrypt/decrypt]\n");
     test_roundtrip_pkt4(); test_roundtrip_pkt8();

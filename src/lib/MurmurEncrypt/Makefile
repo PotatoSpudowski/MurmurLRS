@@ -1,6 +1,6 @@
 CC      = gcc
 CFLAGS  = -Wall -Wextra -Werror -pedantic -std=c11 -I . -g
-SRCS    = aes128.c murmur.c
+SRCS    = ascon.c murmur.c
 TESTS   = test_murmur.c
 BUILD   = build
 

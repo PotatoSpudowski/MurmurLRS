@@ -2,9 +2,9 @@
  * murmur.h — MurmurLRS encryption module
  *
  * Authenticated encryption for ExpressLRS OTA packets.
- * Encrypt-then-MAC with zero packet overhead:
- *   - AES-128-CTR encrypts the payload
- *   - AES-128-CMAC replaces the CRC field (keyed authentication)
+ * ASCON-128 AEAD:
+ *   - 128-bit key, 128-bit nonce
+ *   - Authenticated Encryption with Associated Data
  *   - 32-bit counter reconstructed from 8-bit OtaNonce
  *   - 64-packet sliding window for replay protection
  *
@@ -30,7 +30,7 @@ void murmur_derive_keys(const char *binding_phrase,
                         uint8_t uid[6]);
 
 /* ------------------------------------------------------------------ */
-/*  Packet encryption (encrypt-then-MAC)                               */
+/*  Packet encryption (ASCON-128 AEAD)                                 */
 /* ------------------------------------------------------------------ */
 
 uint16_t murmur_encrypt_packet(const uint8_t enc_key[16],
@@ -65,14 +65,6 @@ typedef struct {
 
 void murmur_replay_init(murmur_replay_t *r);
 bool murmur_replay_check(murmur_replay_t *r, uint32_t counter);
-
-/* ------------------------------------------------------------------ */
-/*  AES-CMAC (used internally, exposed for testing)                    */
-/* ------------------------------------------------------------------ */
-
-void murmur_cmac(const uint8_t key[16],
-                 const uint8_t *msg, uint32_t msg_len,
-                 uint8_t mac[16]);
 
 #ifdef __cplusplus
 }

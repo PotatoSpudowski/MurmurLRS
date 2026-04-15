@@ -1,5 +1,5 @@
 {
     "name": "MurmurEncrypt",
     "version": "0.1.0",
-    "description": "AES-128 authenticated encryption for ExpressLRS packets"
+    "description": "ASCON-128 authenticated encryption for ExpressLRS packets"
 }
