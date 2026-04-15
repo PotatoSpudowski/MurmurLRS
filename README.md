@@ -6,23 +6,46 @@ MurmurLRS encrypts and authenticates every RC packet over the air. Your stick in
 
 ## How do I use MurmurLRS?
 
-1. Download the [latest release](https://github.com/PotatoSpudowski/MurmurLRS/releases) or clone this repo
-2. Open the [ELRS Configurator](https://github.com/ExpressLRS/ExpressLRS-Configurator/releases)
-3. Choose the **Local** tab and point it at the `src` folder
-4. Flash your TX and RX with the `MURMUR_ENCRYPT` build flag
-5. Set a strong binding phrase on both sides -- it's now your encryption key
-
-That's it. Same hardware, same Configurator, same workflow.
-
-### Build from source
+### Step 1: Clone the repo
 
 ```bash
 git clone https://github.com/PotatoSpudowski/MurmurLRS
-cd MurmurLRS/src
-
-# Build for your target with encryption enabled
-pio run -e <your_target> -DMURMUR_ENCRYPT
 ```
+
+### Step 2: Enable encryption
+
+Open `src/user_defines.txt` and add these two lines:
+
+```
+-DMURMUR_ENCRYPT
+-DMY_BINDING_PHRASE="your secret phrase here"
+```
+
+Use a strong binding phrase (3-4 random words minimum). This becomes your encryption key. **Same phrase on both TX and RX.**
+
+### Step 3: Flash with ELRS Configurator
+
+1. Open the [ELRS Configurator](https://github.com/ExpressLRS/ExpressLRS-Configurator/releases)
+2. Go to the **Local** tab
+3. Point it at the `src` folder inside the cloned repo
+4. Select your TX target, flash
+5. Select your RX target, flash
+
+### Step 4: Verify
+
+Connect your TX or RX over USB and open a serial monitor (420000 baud). You should see at boot:
+
+```
+MurmurLRS: encryption active (TX)
+```
+or
+```
+MurmurLRS: encryption active (RX)
+```
+
+If you don't see this, the build flag didn't get picked up. Check that `-DMURMUR_ENCRYPT` is in `user_defines.txt` (not `common.ini` or elsewhere).
+
+**Important:** Both TX and RX must be flashed with MurmurLRS. A MurmurLRS TX will not connect to a stock ELRS RX (and vice versa). If one side has encryption and the other doesn't, SYNC packets will get through but all data packets will fail -- you'll see the link flicker but never fully connect.
 
 ## FAQ
 
@@ -65,9 +88,9 @@ Everything ELRS supports -- ESP32, ESP8285, STM32 targets, 900 MHz and 2.4 GHz. 
 
 **Beta -- testers needed.**
 
-The encryption module passes 30 tests including NIST AES-128 vectors and RFC 4493 CMAC test vectors. What it needs is real-world validation:
+The encryption module passes 32 tests including NIST AES-128 vectors and RFC 4493 CMAC test vectors. What it needs is real-world validation:
 
-- [x] Crypto correctness (30/30 tests)
+- [x] Crypto correctness (32/32 tests)
 - [x] Zero packet overhead (same air rate, same packet size)
 - [ ] Over-the-air TX/RX encrypted link test
 - [ ] Range testing (should be identical to stock)
@@ -88,12 +111,12 @@ make test
 === MurmurLRS Crypto Test Suite ===
 [AES-128 ECB]           3/3  PASS
 [AES-CMAC (RFC 4493)]   4/4  PASS
-[Packet encrypt/decrypt] 6/6  PASS
+[Packet encrypt/decrypt] 8/8  PASS
 [Counter reconstruction] 5/5  PASS
 [Replay protection]      7/7  PASS
 [Key derivation]         3/3  PASS
 [Integration]            2/2  PASS
-=== Results: 30/30 passed ===
+=== Results: 32/32 passed ===
 ```
 
 ## Binding phrase = encryption key
@@ -120,8 +143,11 @@ SYNC packets remain unencrypted for connection establishment.
 - AES-128-CTR for encryption (NIST SP 800-38A)
 - AES-128-CMAC for authentication (RFC 4493)
 - AES-CMAC KDF for key derivation
-- 32-bit counter reconstructed from 8-bit OtaNonce
+- Direction-separated nonces (uplink=0, downlink=1) to prevent keystream reuse
+- 32-bit counter derived from OtaNonce with epoch tracking
+- Full header byte included in MAC (authenticates packet type, flags, and metadata)
 - 64-packet sliding window replay protection
+- Automatic counter reset on SYNC resync, link loss, and rebind
 
 **Key derivation:**
 ```
@@ -135,9 +161,9 @@ master_key -> AES-CMAC(master, "murmur-uid") -> UID (6 bytes, ELRS compatible)
 | File | Change |
 |------|--------|
 | `src/lib/MurmurEncrypt/*` | New: encryption module (~500 LOC pure C) |
-| `src/lib/OTA/OTA.cpp` | Wraps CRC functions with encrypt/decrypt |
-| `src/src/tx_main.cpp` | 4 lines: init encryption at boot |
-| `src/src/rx_main.cpp` | 4 lines: init encryption at boot |
+| `src/lib/OTA/OTA.cpp` | Wraps CRC functions with encrypt/decrypt, counter tracking |
+| `src/src/tx_main.cpp` | Init encryption at boot, counter reset on rate change |
+| `src/src/rx_main.cpp` | Init encryption at boot, counter reset on SYNC/disconnect/bind |
 
 The encryption module is pure C with no external dependencies. ~1 KB code size. Tested against NIST and RFC reference vectors.
 
