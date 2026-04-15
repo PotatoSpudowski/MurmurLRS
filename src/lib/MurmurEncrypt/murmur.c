@@ -14,8 +14,7 @@
 /* Internal ASCON function -- not part of the public API */
 void ascon128_decrypt_no_verify(const uint8_t key[16], const uint8_t nonce[16],
                                 const uint8_t *ad, uint64_t ad_len,
-                                const uint8_t *c, uint64_t c_len,
-                                uint8_t *m, uint8_t expected_tag[16]);
+                                uint8_t *c, uint64_t c_len, uint8_t expected_tag[16]);
 
 /* ------------------------------------------------------------------ */
 /*  Key derivation                                                     */
@@ -62,19 +61,12 @@ uint16_t murmur_encrypt_packet(const uint8_t enc_key[16],
                                uint8_t *payload, uint8_t payload_len,
                                uint8_t mac_bits)
 {
-    if (payload_len > 16)
-        return 0;
-
     uint8_t nonce[16];
-    uint8_t ciphertext[16 + 16]; // payload + tag
+    uint8_t tag[16]; // payload + tag
 
     prepare_nonce(counter, header, direction, nonce);
 
-    ascon128_encrypt(enc_key, nonce, &header, 1, payload, payload_len, ciphertext);
-
-    /* The ciphertext contains encrypted payload followed by 16-byte tag */
-    memcpy(payload, ciphertext, payload_len);
-    uint8_t *tag = ciphertext + payload_len;
+    ascon128_encrypt(enc_key, nonce, &header, 1, payload, payload_len, tag);
 
     uint16_t truncated = ((uint16_t)tag[0] << 8) | tag[1];
     if (mac_bits < 16)
@@ -90,18 +82,14 @@ bool murmur_decrypt_packet(const uint8_t enc_key[16],
                            uint8_t *payload, uint8_t payload_len,
                            uint16_t received_mac, uint8_t mac_bits)
 {
-    if (payload_len > 16)
-        return false;
-
     uint8_t nonce[16];
     uint8_t expected_tag[16];
-    uint8_t decrypted[16];
 
     prepare_nonce(counter, header, direction, nonce);
 
     /* Decrypt the ciphertext (which is in payload) and get the expected tag */
     ascon128_decrypt_no_verify(enc_key, nonce, &header, 1, payload, payload_len,
-                               decrypted, expected_tag);
+                               expected_tag);
 
     uint16_t expected = ((uint16_t)expected_tag[0] << 8) | expected_tag[1];
     if (mac_bits < 16)
@@ -110,7 +98,6 @@ bool murmur_decrypt_packet(const uint8_t enc_key[16],
     if (expected != received_mac)
         return false;
 
-    memcpy(payload, decrypted, payload_len);
     return true;
 }
 

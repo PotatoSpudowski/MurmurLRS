@@ -36,14 +36,14 @@ static void hex_to_bytes(const char *hex, uint8_t *out, int len)
 static void test_ascon128_basic(void)
 {
     TEST("ASCON-128 AEAD: official test vector (empty AD/P)");
-    uint8_t key[16], nonce[16], ciphertext[16];
+    uint8_t key[16], nonce[16], tag[16];
     uint8_t expected_tag[16];
     hex_to_bytes("000102030405060708090a0b0c0d0e0f", key, 16);
     hex_to_bytes("000102030405060708090a0b0c0d0e0f", nonce, 16);
     hex_to_bytes("e355159f292911f794cb1432a0103a8a", expected_tag, 16);
 
-    ascon128_encrypt(key, nonce, NULL, 0, NULL, 0, ciphertext);
-    ASSERT_MEM_EQ(ciphertext, expected_tag, 16, "tag mismatch");
+    ascon128_encrypt(key, nonce, NULL, 0, NULL, 0, tag);
+    ASSERT_MEM_EQ(tag, expected_tag, 16, "tag mismatch");
     PASS();
 }
 
@@ -54,14 +54,14 @@ static void test_ascon128_roundtrip(void)
     uint8_t nonce[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,42};
     uint8_t ad[] = "associated data";
     uint8_t m[] = "this is a message";
-    uint8_t c[sizeof(m) + 16];
-    uint8_t decrypted[sizeof(m)];
+    const uint8_t original_m[] = "this is a message";
+    uint8_t tag[16];
 
-    ascon128_encrypt(key, nonce, ad, strlen((char*)ad), m, strlen((char*)m), c);
-    int res = ascon128_decrypt(key, nonce, ad, strlen((char*)ad), c, strlen((char*)m) + 16, decrypted);
+    ascon128_encrypt(key, nonce, ad, strlen((char*)ad), m, strlen((char*)m), tag);
+    int res = ascon128_decrypt(key, nonce, ad, strlen((char*)ad), m, strlen((char*)m), tag);
 
     ASSERT_EQ(res, 0, "decryption failed");
-    ASSERT_MEM_EQ(decrypted, m, strlen((char*)m), "plaintext mismatch");
+    ASSERT_MEM_EQ(original_m, m, strlen((char*)m), "plaintext mismatch");
     PASS();
 }
 

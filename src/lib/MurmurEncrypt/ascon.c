@@ -146,8 +146,8 @@ static inline void storebytes_32(uint8_t *p, u64_32 x, int n)
 }
 
 void ascon128_encrypt(const uint8_t key[16], const uint8_t nonce[16],
-                      const uint8_t *ad, uint64_t ad_len, const uint8_t *m,
-                      uint64_t m_len, uint8_t *c)
+                      const uint8_t *ad, uint32_t ad_len, uint8_t *m,
+                      uint32_t m_len, uint8_t tag[16])
 {
     ascon_state_t s;
     u64_32 k0, k1, n0, n1;
@@ -179,13 +179,13 @@ void ascon128_encrypt(const uint8_t key[16], const uint8_t nonce[16],
             ad_len -= 8;
         }
         u64_32 w;
-        loadbytes_32(&w, ad, (int)ad_len);
+        loadbytes_32(&w, ad, ad_len);
         s.x0.h ^= w.h;
         s.x0.l ^= w.l;
         if (ad_len < 4) {
-            s.x0.h ^= (1UL << (31 - 8 * (int)ad_len));
+            s.x0.h ^= (1UL << (31 - 8 * ad_len));
         } else {
-            s.x0.l ^= (1UL << (31 - 8 * ((int)ad_len - 4)));
+            s.x0.l ^= (1UL << (31 - 8 * (ad_len - 4)));
         }
         ascon_permutation(&s, 6);
     }
@@ -196,23 +196,21 @@ void ascon128_encrypt(const uint8_t key[16], const uint8_t nonce[16],
         load64_32(&w, m);
         s.x0.h ^= w.h;
         s.x0.l ^= w.l;
-        store64_32(c, s.x0);
+        store64_32(m, s.x0);
         ascon_permutation(&s, 6);
         m += 8;
-        c += 8;
         m_len -= 8;
     }
     u64_32 w;
-    loadbytes_32(&w, m, (int)m_len);
+    loadbytes_32(&w, m, m_len);
     s.x0.h ^= w.h;
     s.x0.l ^= w.l;
-    storebytes_32(c, s.x0, (int)m_len);
+    storebytes_32(m, s.x0, m_len);
     if (m_len < 4) {
-        s.x0.h ^= (1UL << (31 - 8 * (int)m_len));
+        s.x0.h ^= (1UL << (31 - 8 * m_len));
     } else {
-        s.x0.l ^= (1UL << (31 - 8 * ((int)m_len - 4)));
+        s.x0.l ^= (1UL << (31 - 8 * (m_len - 4)));
     }
-    c += m_len;
 
     s.x1.h ^= k0.h;
     s.x1.l ^= k0.l;
@@ -223,14 +221,13 @@ void ascon128_encrypt(const uint8_t key[16], const uint8_t nonce[16],
     s.x3.l ^= k0.l;
     s.x4.h ^= k1.h;
     s.x4.l ^= k1.l;
-    store64_32(c, s.x3);
-    store64_32(c + 8, s.x4);
+    store64_32(tag, s.x3);
+    store64_32(tag + 8, s.x4);
 }
 
 void ascon128_decrypt_no_verify(const uint8_t key[16], const uint8_t nonce[16],
-                                const uint8_t *ad, uint64_t ad_len,
-                                const uint8_t *c, uint64_t c_len, uint8_t *m,
-                                uint8_t expected_tag[16])
+                                const uint8_t *ad, uint32_t ad_len,
+                                uint8_t *c, uint32_t c_len, uint8_t expected_tag[16])
 {
     ascon_state_t s;
     u64_32 k0, k1, n0, n1;
@@ -262,13 +259,13 @@ void ascon128_decrypt_no_verify(const uint8_t key[16], const uint8_t nonce[16],
             ad_len -= 8;
         }
         u64_32 w;
-        loadbytes_32(&w, ad, (int)ad_len);
+        loadbytes_32(&w, ad, ad_len);
         s.x0.h ^= w.h;
         s.x0.l ^= w.l;
         if (ad_len < 4) {
-            s.x0.h ^= (1UL << (31 - 8 * (int)ad_len));
+            s.x0.h ^= (1UL << (31 - 8 * ad_len));
         } else {
-            s.x0.l ^= (1UL << (31 - 8 * ((int)ad_len - 4)));
+            s.x0.l ^= (1UL << (31 - 8 * (ad_len - 4)));
         }
         ascon_permutation(&s, 6);
     }
@@ -280,31 +277,30 @@ void ascon128_decrypt_no_verify(const uint8_t key[16], const uint8_t nonce[16],
         u64_32 mi;
         mi.h = s.x0.h ^ ci.h;
         mi.l = s.x0.l ^ ci.l;
-        store64_32(m, mi);
+        store64_32(c, mi);
         s.x0 = ci;
         ascon_permutation(&s, 6);
-        m += 8;
         c += 8;
         c_len -= 8;
     }
     u64_32 ci;
-    loadbytes_32(&ci, c, (int)c_len);
+    loadbytes_32(&ci, c, c_len);
     u64_32 mi;
     mi.h = s.x0.h ^ ci.h;
     mi.l = s.x0.l ^ ci.l;
-    storebytes_32(m, mi, (int)c_len);
+    storebytes_32(c, mi, c_len);
 
     if (c_len < 4) {
         uint32_t mask =
-            (c_len == 0) ? 0 : (0xFFFFFFFFUL << (32 - 8 * (int)c_len));
+            (c_len == 0) ? 0 : (0xFFFFFFFFUL << (32 - 8 * c_len));
         s.x0.h = (s.x0.h & ~mask) | ci.h;
-        s.x0.h ^= (1UL << (31 - 8 * (int)c_len));
+        s.x0.h ^= (1UL << (31 - 8 * c_len));
     } else {
         s.x0.h = ci.h;
         uint32_t mask =
-            (c_len == 4) ? 0 : (0xFFFFFFFFUL << (32 - 8 * ((int)c_len - 4)));
+            (c_len == 4) ? 0 : (0xFFFFFFFFUL << (32 - 8 * (c_len - 4)));
         s.x0.l = (s.x0.l & ~mask) | ci.l;
-        s.x0.l ^= (1UL << (31 - 8 * ((int)c_len - 4)));
+        s.x0.l ^= (1UL << (31 - 8 * (c_len - 4)));
     }
 
     s.x1.h ^= k0.h;
@@ -321,22 +317,19 @@ void ascon128_decrypt_no_verify(const uint8_t key[16], const uint8_t nonce[16],
 }
 
 int ascon128_decrypt(const uint8_t key[16], const uint8_t nonce[16],
-                     const uint8_t *ad, uint64_t ad_len, const uint8_t *c,
-                     uint64_t c_len, uint8_t *m)
+                     const uint8_t *ad, uint32_t ad_len, uint8_t *c,
+                     uint32_t c_len, const uint8_t tag[16])
 {
-    if (c_len < 16) {
-        return -1;
-    }
-    uint8_t tag[16];
-    ascon128_decrypt_no_verify(key, nonce, ad, ad_len, c, c_len - 16, m, tag);
-    if (memcmp(tag, c + c_len - 16, 16) == 0) {
+    uint8_t computed_tag[16];
+    ascon128_decrypt_no_verify(key, nonce, ad, ad_len, c, c_len, computed_tag);
+    if (memcmp(tag, computed_tag, 16) == 0) {
         return 0;
     }
     return -1;
 }
 
-void ascon_xof(const uint8_t *in, uint64_t in_len, uint8_t *out,
-               uint64_t out_len)
+void ascon_xof(const uint8_t *in, uint32_t in_len, uint8_t *out,
+               uint32_t out_len)
 {
     ascon_state_t s;
     /* ASCON-XOF initialization (IV=00400c0000000000) */
