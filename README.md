@@ -1,5 +1,10 @@
 # MurmurLRS
 
+[![Crypto Tests](https://img.shields.io/badge/crypto%20tests-32%2F32%20pass-brightgreen?style=flat-square)](src/lib/MurmurEncrypt/)
+[![AES-128](https://img.shields.io/badge/AES--128--CTR%20%2B%20CMAC-NIST%20verified-blue?style=flat-square)](src/lib/MurmurEncrypt/test_murmur.c)
+[![Reddit](https://img.shields.io/badge/r%2Ffpv-423%2B%20upvotes-orange?style=flat-square&logo=reddit)](https://www.reddit.com/r/fpv/comments/1sl5hf1/)
+[![License](https://img.shields.io/github/license/PotatoSpudowski/MurmurLRS?style=flat-square)](https://github.com/PotatoSpudowski/MurmurLRS/blob/master/LICENSE)
+
 **A privacy-focused fork of ExpressLRS with authenticated encryption.**
 
 MurmurLRS encrypts and authenticates every RC packet over the air. Your stick inputs, telemetry, and channel data are protected with AES-128 -- nobody can read your link or inject commands.
@@ -174,6 +179,12 @@ The encryption module is pure C with no external dependencies. ~1 KB code size. 
 - LCG hop sequence is inherited from ELRS
 
 </details>
+
+## Community
+
+This project started with a [post on r/fpv](https://www.reddit.com/r/fpv/comments/1sl5hf1/) that hit #1 for the day (423+ upvotes, 155+ comments). The thread has detailed discussion on the crypto design, performance tradeoffs, and comparisons with stock ELRS.
+
+Looking for people willing to bench test or fly with it, especially on ESP8266 and STM32 targets. You flash through the normal ELRS Configurator using the Local tab -- same workflow you're used to.
 
 ## Contributing
 
