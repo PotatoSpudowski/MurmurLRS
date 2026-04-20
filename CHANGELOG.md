@@ -2,6 +2,11 @@
 
 All notable changes to MurmurLRS are documented here.
 
+## v0.5.1 (2026-04-20)
+
+- Synced with upstream ExpressLRS (up to 87d2d4d3)
+- Fix screen joystick broken by MSP bind phrase changes (upstream PR #3614)
+
 ## v0.5 (2026-04-16)
 
 - Synced with upstream ExpressLRS (up to 34a68884)

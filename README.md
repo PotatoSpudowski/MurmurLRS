@@ -218,11 +218,11 @@ Quick ways to help:
 
 ## Recent changes
 
-### v0.5 (2026-04-16)
-- Synced with upstream ExpressLRS (up to 34a68884)
-- MSP bind phrase support, dynamic power improvements, CRSF int16/int32 types
+### v0.5.1 (2026-04-20)
+- Synced with upstream ExpressLRS (up to 87d2d4d3)
+- Fix screen joystick broken by MSP bind phrase changes
 
-### v0.4 (2026-04-16)
+### v0.5 (2026-04-16)
 - Replaced AES-128-CTR + AES-CMAC with ASCON-128 AEAD ([NIST SP 800-232](https://csrc.nist.gov/pubs/sp/800/232/ipd))
 - Single-pass authenticated encryption: 3.5-4.3x faster than software AES
 
