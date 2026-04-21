@@ -79,7 +79,7 @@ PrivacyLRS encrypts. MurmurLRS encrypts and authenticates. If someone flips bits
 
 ## Hardware
 
-Everything ELRS supports. ESP32, ESP8285, STM32. 900 MHz and 2.4 GHz. Same radios, same modules.
+Everything ELRS supports. ESP32, ESP32-S3, ESP32-C3, ESP8285. 900 MHz and 2.4 GHz. Same radios, same modules.
 
 ## Tests
 
@@ -128,7 +128,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - **Flash and test** -- report what works and breaks
 - **Review the crypto** -- under 500 lines of C in `src/lib/MurmurEncrypt/`
-- **ESP8266/STM32 testing** -- primary dev is on ESP32
+- **ESP8285/ESP32-S3/C3 testing** -- primary dev is on ESP32
 
 ## Community
 

@@ -20,7 +20,7 @@ The most valuable contribution right now is real-world testing. Flash MurmurLRS 
 - Rate switching and reconnection
 - Failsafe behavior under encryption
 - Range (should be identical to stock ELRS)
-- Different hardware targets (ESP32, ESP8285, STM32)
+- Different hardware targets (ESP32, ESP32-S3, ESP32-C3, ESP8285)
 - 900 MHz and 2.4 GHz
 
 **How to report:** Open an issue with your hardware, firmware version, what you tested, and what happened.
