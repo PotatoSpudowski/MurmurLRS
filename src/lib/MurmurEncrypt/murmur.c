@@ -13,9 +13,8 @@
 
 /* Internal ASCON function -- not part of the public API */
 void ascon128_decrypt_no_verify(const uint8_t key[16], const uint8_t nonce[16],
-                                const uint8_t *ad, uint64_t ad_len,
-                                const uint8_t *c, uint64_t c_len,
-                                uint8_t *m, uint8_t expected_tag[16]);
+                                const uint8_t *ad, uint32_t ad_len,
+                                uint8_t *c, uint32_t c_len, uint8_t expected_tag[16]);
 
 /* ------------------------------------------------------------------ */
 /*  Key derivation                                                     */
@@ -43,7 +42,7 @@ void murmur_derive_keys(const char *binding_phrase,
 /*  Packet encryption / decryption                                     */
 /* ------------------------------------------------------------------ */
 
-static void prepare_nonce(uint32_t counter, uint8_t packet_type,
+static void prepare_nonce(uint32_t counter, uint8_t header,
                           uint8_t direction, uint8_t nonce[16])
 {
     memset(nonce, 0, 16);
@@ -51,30 +50,23 @@ static void prepare_nonce(uint32_t counter, uint8_t packet_type,
     nonce[1] = (uint8_t)(counter >> 16);
     nonce[2] = (uint8_t)(counter >> 8);
     nonce[3] = (uint8_t)(counter);
-    nonce[4] = packet_type;
+    nonce[4] = header;
     nonce[5] = direction;
 }
 
 uint16_t murmur_encrypt_packet(const uint8_t enc_key[16],
                                uint32_t counter,
-                               uint8_t packet_type,
+                               uint8_t header,
                                uint8_t direction,
                                uint8_t *payload, uint8_t payload_len,
                                uint8_t mac_bits)
 {
-    if (payload_len > 16)
-        return 0;
-
     uint8_t nonce[16];
-    uint8_t ciphertext[16 + 16]; // payload + tag
+    uint8_t tag[16]; // payload + tag
 
-    prepare_nonce(counter, packet_type, direction, nonce);
+    prepare_nonce(counter, header, direction, nonce);
 
-    ascon128_encrypt(enc_key, nonce, NULL, 0, payload, payload_len, ciphertext);
-
-    /* The ciphertext contains encrypted payload followed by 16-byte tag */
-    memcpy(payload, ciphertext, payload_len);
-    uint8_t *tag = ciphertext + payload_len;
+    ascon128_encrypt(enc_key, nonce, &header, 1, payload, payload_len, tag);
 
     uint16_t truncated = ((uint16_t)tag[0] << 8) | tag[1];
     if (mac_bits < 16)
@@ -85,32 +77,32 @@ uint16_t murmur_encrypt_packet(const uint8_t enc_key[16],
 
 bool murmur_decrypt_packet(const uint8_t enc_key[16],
                            uint32_t counter,
-                           uint8_t packet_type,
+                           uint8_t header,
                            uint8_t direction,
                            uint8_t *payload, uint8_t payload_len,
                            uint16_t received_mac, uint8_t mac_bits)
 {
-    if (payload_len > 16)
-        return false;
-
     uint8_t nonce[16];
     uint8_t expected_tag[16];
-    uint8_t decrypted[16];
+    uint8_t saved[16];
 
-    prepare_nonce(counter, packet_type, direction, nonce);
+    /* Save ciphertext so in-place decrypt doesn't destroy it on MAC mismatch */
+    memcpy(saved, payload, payload_len);
 
-    /* Decrypt the ciphertext (which is in payload) and get the expected tag */
-    ascon128_decrypt_no_verify(enc_key, nonce, NULL, 0, payload, payload_len,
-                               decrypted, expected_tag);
+    prepare_nonce(counter, header, direction, nonce);
+
+    ascon128_decrypt_no_verify(enc_key, nonce, &header, 1, payload, payload_len,
+                               expected_tag);
 
     uint16_t expected = ((uint16_t)expected_tag[0] << 8) | expected_tag[1];
     if (mac_bits < 16)
         expected >>= (16 - mac_bits);
 
-    if (expected != received_mac)
+    if (expected != received_mac) {
+        memcpy(payload, saved, payload_len);
         return false;
+    }
 
-    memcpy(payload, decrypted, payload_len);
     return true;
 }
 
