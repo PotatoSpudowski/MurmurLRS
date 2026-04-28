@@ -35,14 +35,14 @@ void murmur_derive_keys(const char *binding_phrase,
 
 uint16_t murmur_encrypt_packet(const uint8_t enc_key[16],
                                uint32_t counter,
-                               uint8_t header,
+                               uint8_t packet_type,
                                uint8_t direction,
                                uint8_t *payload, uint8_t payload_len,
                                uint8_t mac_bits);
 
 bool murmur_decrypt_packet(const uint8_t enc_key[16],
                            uint32_t counter,
-                           uint8_t header,
+                           uint8_t packet_type,
                            uint8_t direction,
                            uint8_t *payload, uint8_t payload_len,
                            uint16_t received_mac, uint8_t mac_bits);
