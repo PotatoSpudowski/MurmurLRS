@@ -11,3 +11,5 @@ src/hardware
 venv/
 .context/
 benchmark/
+CLAUDE.md
+docs/

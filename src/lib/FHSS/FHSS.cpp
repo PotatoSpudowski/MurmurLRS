@@ -3,6 +3,12 @@
 #include "options.h"
 #include <string.h>
 
+#if defined(MURMUR_ENCRYPT)
+extern "C" {
+#include "murmur.h"
+}
+#endif
+
 #if defined(UNIT_TEST)
 #define POWER_OUTPUT_VALUES_COUNT 4
 #define POWER_OUTPUT_VALUES_DUAL_COUNT 0
@@ -88,7 +94,7 @@ constexpr uint8_t VERSION_DOMAIN_MAXLEN = 26 + 1;   // max. number of characters
 char version_domain[VERSION_DOMAIN_MAXLEN] {};
 
 
-void FHSSrandomiseFHSSsequence(const uint32_t seed)
+static void FHSSinitDomainConfig()
 {
     FHSSconfig = &domains[firmwareOptions.domain];
     sync_channel = FHSSconfig->freq_count / 2;
@@ -98,8 +104,6 @@ void FHSSrandomiseFHSSsequence(const uint32_t seed)
     DBGLN("Primary Domain %s, %u channels, sync=%u",
         FHSSconfig->domain, FHSSconfig->freq_count, sync_channel);
 
-    FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfig->freq_count, sync_channel, FHSSsequence);
-
 #if defined(RADIO_LR1121)
     FHSSconfigDualBand = &domainsDualBand[0];
     sync_channel_DualBand = FHSSconfigDualBand->freq_count / 2;
@@ -108,15 +112,49 @@ void FHSSrandomiseFHSSsequence(const uint32_t seed)
 
     DBGLN("Dual Domain %s, %u channels, sync=%u",
         FHSSconfigDualBand->domain, FHSSconfigDualBand->freq_count, sync_channel_DualBand);
+#endif
+}
 
+void FHSSrandomiseFHSSsequence(const uint32_t seed)
+{
+    FHSSinitDomainConfig();
+
+    FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfig->freq_count, sync_channel, FHSSsequence);
+
+#if defined(RADIO_LR1121)
     FHSSusePrimaryFreqBand = false;
     FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfigDualBand->freq_count, sync_channel_DualBand, FHSSsequence_DualBand);
     FHSSusePrimaryFreqBand = true;
 #endif
 
-    // add frequency and regulatory domain to the string used by the Lua script
     addDomainInfo(version_domain, VERSION_DOMAIN_MAXLEN);
 }
+
+#if defined(MURMUR_ENCRYPT)
+void FHSSrandomiseFHSSsequenceSecure(const uint8_t uid[6])
+{
+    FHSSinitDomainConfig();
+    FHSSptr = 0;
+
+    uint8_t fhss_key[16];
+    murmur_derive_fhss_key(uid, fhss_key);
+
+    murmur_fhss_fill_sequence(fhss_key, 0x00, FHSSsequence,
+                              primaryBandCount, FHSSconfig->freq_count, sync_channel);
+
+    DBGLN("FHSSv2: ASCON-XOF CSPRNG sequence generated (primary)");
+
+#if defined(RADIO_LR1121)
+    FHSSusePrimaryFreqBand = false;
+    murmur_fhss_fill_sequence(fhss_key, 0x01, FHSSsequence_DualBand,
+                              secondaryBandCount, FHSSconfigDualBand->freq_count, sync_channel_DualBand);
+    FHSSusePrimaryFreqBand = true;
+    DBGLN("FHSSv2: ASCON-XOF CSPRNG sequence generated (dual-band)");
+#endif
+
+    addDomainInfo(version_domain, VERSION_DOMAIN_MAXLEN);
+}
+#endif
 
 /**
 Requirements:
