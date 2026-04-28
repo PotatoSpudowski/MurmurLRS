@@ -13,8 +13,8 @@
 
 /* Internal ASCON function -- not part of the public API */
 void ascon128_decrypt_no_verify(const uint8_t key[16], const uint8_t nonce[16],
-                                const uint8_t *ad, uint64_t ad_len,
-                                uint8_t *c, uint64_t c_len, uint8_t expected_tag[16]);
+                                const uint8_t *ad, uint32_t ad_len,
+                                uint8_t *c, uint32_t c_len, uint8_t expected_tag[16]);
 
 /* ------------------------------------------------------------------ */
 /*  Key derivation                                                     */
@@ -84,10 +84,13 @@ bool murmur_decrypt_packet(const uint8_t enc_key[16],
 {
     uint8_t nonce[16];
     uint8_t expected_tag[16];
+    uint8_t saved[16];
+
+    /* Save ciphertext so in-place decrypt doesn't destroy it on MAC mismatch */
+    memcpy(saved, payload, payload_len);
 
     prepare_nonce(counter, header, direction, nonce);
 
-    /* Decrypt the ciphertext (which is in payload) and get the expected tag */
     ascon128_decrypt_no_verify(enc_key, nonce, &header, 1, payload, payload_len,
                                expected_tag);
 
@@ -95,8 +98,10 @@ bool murmur_decrypt_packet(const uint8_t enc_key[16],
     if (mac_bits < 16)
         expected >>= (16 - mac_bits);
 
-    if (expected != received_mac)
+    if (expected != received_mac) {
+        memcpy(payload, saved, payload_len);
         return false;
+    }
 
     return true;
 }
