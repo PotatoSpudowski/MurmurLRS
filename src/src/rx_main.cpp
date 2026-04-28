@@ -1709,7 +1709,11 @@ static void ExitBindingMode()
     config.Commit();
 
     OtaUpdateCrcInitFromUid();
+#if defined(MURMUR_ENCRYPT)
+    FHSSrandomiseFHSSsequenceSecure(UID);
+#else
     FHSSrandomiseFHSSsequence(OtaGetUidSeed());
+#endif
 
     webserverPreventAutoStart = true;
 
@@ -2045,10 +2049,11 @@ void setup()
 #if defined(MURMUR_ENCRYPT)
         extern void MurmurInitFromUid(const uint8_t uid[6], bool is_tx);
         MurmurInitFromUid(UID, false);
-        DBGLN("MurmurLRS: encryption active (RX)");
-#endif
-
+        FHSSrandomiseFHSSsequenceSecure(UID);
+        DBGLN("MurmurLRS: encryption + FHSSv2 active (RX)");
+#else
         FHSSrandomiseFHSSsequence(OtaGetUidSeed());
+#endif
 
         setupRadio();
 
