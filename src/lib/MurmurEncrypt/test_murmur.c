@@ -444,6 +444,29 @@ static void test_fhss_seq_all_channels_used(void)
     PASS();
 }
 
+static void test_fhss_seq_3ch_rejection_sampling(void)
+{
+    TEST("FHSS seq: 3-channel domain (rejection sampling edge case)");
+    uint8_t fhss_key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t seq[256];
+    uint8_t num_ch = 3;
+    uint8_t sync_ch = 1;
+    uint16_t seq_len = 252;
+    murmur_fhss_fill_sequence(fhss_key, 0, seq, seq_len, num_ch, sync_ch);
+    for (uint16_t i = 0; i < seq_len; i += num_ch)
+        ASSERT_EQ(seq[i], sync_ch, "sync at block start");
+    for (uint16_t block = 0; block < seq_len / num_ch; block++) {
+        uint8_t seen[3] = {0};
+        for (uint8_t j = 0; j < num_ch; j++) {
+            uint8_t ch = seq[block * num_ch + j];
+            ASSERT_EQ(ch < num_ch, 1, "channel out of range");
+            ASSERT_EQ(seen[ch], 0, "channel repeated");
+            seen[ch] = 1;
+        }
+    }
+    PASS();
+}
+
 static void test_fhss_seq_different_domains(void)
 {
     TEST("FHSS seq: different domain_id produces different sequence");
@@ -661,7 +684,8 @@ int main(void)
     test_fhss_seq_deterministic(); test_fhss_seq_sync_channel();
     test_fhss_seq_no_repeats_in_block(); test_fhss_seq_all_channels_used();
     test_fhss_seq_different_domains(); test_fhss_seq_different_keys();
-    test_fhss_seq_small_domain(); test_fhss_seq_80ch();
+    test_fhss_seq_small_domain(); test_fhss_seq_3ch_rejection_sampling();
+    test_fhss_seq_80ch();
 
     printf("\n[Integration]\n");
     test_full_flow(); test_forgery_rejected();

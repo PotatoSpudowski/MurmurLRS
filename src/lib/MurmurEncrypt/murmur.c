@@ -153,7 +153,9 @@ void murmur_fhss_fill_sequence(const uint8_t fhss_key[16],
      * Rejection sampling eliminates modulo bias: we discard values >= threshold
      * where threshold is the largest multiple of (num_channels-1) that fits in 256. */
     uint8_t range = num_channels - 1;
-    uint8_t threshold = 256 - (256 % range);
+    /* Use uint16_t: when range divides 256, 256 % range == 0 and threshold == 256,
+     * which overflows uint8_t to 0 (every sample would be rejected). */
+    uint16_t threshold = 256 - (256 % range);
     uint16_t buf_idx = 0;
 
     for (uint16_t i = 0; i < seq_len; i++) {
