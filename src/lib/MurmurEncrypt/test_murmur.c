@@ -381,6 +381,78 @@ static void test_forgery_rejected(void)
 }
 
 /* ================================================================== */
+/*  OTA4/OTA8 header-as-AD correctness                                 */
+/* ================================================================== */
+
+static void test_ota4_header_mismatch(void)
+{
+    TEST("OTA4 header: crcHigh contamination causes MAC failure");
+    uint8_t key[16], uid[6];
+    murmur_derive_keys("test-phrase", key, uid);
+    uint8_t payload[6] = {0x11,0x22,0x33,0x44,0x55,0x66};
+
+    /* TX encrypts with header = type bits only (0x01) */
+    uint8_t tx_payload[6];
+    memcpy(tx_payload, payload, 6);
+    uint16_t mac = murmur_encrypt_packet(key, 100, 0x01, 0, tx_payload, 6, 14);
+
+    /* RX tries to decrypt with contaminated header (crcHigh=0x3F in upper 6 bits) */
+    uint8_t rx_payload[6];
+    memcpy(rx_payload, tx_payload, 6);
+    uint8_t contaminated_header = 0x01 | (0x3F << 2);
+    bool ok = murmur_decrypt_packet(key, 100, contaminated_header, 0,
+                                    rx_payload, 6, mac, 14);
+    ASSERT_EQ(ok, false, "contaminated header should fail");
+    PASS();
+}
+
+static void test_ota4_header_masked_succeeds(void)
+{
+    TEST("OTA4 header: masked type-only AD succeeds on both sides");
+    uint8_t key[16], uid[6];
+    murmur_derive_keys("test-phrase", key, uid);
+    uint8_t payload[6] = {0xAA,0xBB,0xCC,0xDD,0xEE,0xFF};
+
+    /* TX: header = ptype = byte0 & 0x03 = 0x02 */
+    uint8_t tx_payload[6];
+    memcpy(tx_payload, payload, 6);
+    uint16_t mac = murmur_encrypt_packet(key, 200, 0x02, 0, tx_payload, 6, 14);
+
+    /* RX: same masked header (0x02), regardless of what crcHigh was on wire */
+    uint8_t rx_payload[6];
+    memcpy(rx_payload, tx_payload, 6);
+    bool ok = murmur_decrypt_packet(key, 200, 0x02, 0, rx_payload, 6, mac, 14);
+    ASSERT_EQ(ok, true, "same masked header should succeed");
+    ASSERT_MEM_EQ(rx_payload, payload, 6, "decrypted data should match original");
+    PASS();
+}
+
+static void test_ota8_full_header_authenticated(void)
+{
+    TEST("OTA8 header: full byte authenticated, bit flip rejected");
+    uint8_t key[16], uid[6];
+    murmur_derive_keys("test-phrase", key, uid);
+    uint8_t payload[10] = {1,2,3,4,5,6,7,8,9,10};
+
+    /* TX encrypts with full OTA8 header byte (e.g., 0xA1 = type 0x01 + flags) */
+    uint8_t tx_payload[10];
+    memcpy(tx_payload, payload, 10);
+    uint16_t mac = murmur_encrypt_packet(key, 300, 0xA1, 0, tx_payload, 10, 16);
+
+    /* RX with correct full header succeeds */
+    uint8_t rx_payload[10];
+    memcpy(rx_payload, tx_payload, 10);
+    bool ok = murmur_decrypt_packet(key, 300, 0xA1, 0, rx_payload, 10, mac, 16);
+    ASSERT_EQ(ok, true, "correct full header should succeed");
+
+    /* RX with flipped upper bit fails */
+    memcpy(rx_payload, tx_payload, 10);
+    ok = murmur_decrypt_packet(key, 300, 0x21, 0, rx_payload, 10, mac, 16);
+    ASSERT_EQ(ok, false, "flipped header bit should fail");
+    PASS();
+}
+
+/* ================================================================== */
 /*  Main                                                               */
 /* ================================================================== */
 
@@ -409,6 +481,11 @@ int main(void)
 
     printf("\n[Key derivation]\n");
     test_key_deterministic(); test_key_different(); test_key_independent();
+
+    printf("\n[OTA header-as-AD]\n");
+    test_ota4_header_mismatch();
+    test_ota4_header_masked_succeeds();
+    test_ota8_full_header_authenticated();
 
     printf("\n[Integration]\n");
     test_full_flow(); test_forgery_rejected();
