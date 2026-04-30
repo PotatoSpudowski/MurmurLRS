@@ -4,7 +4,7 @@
 
 Encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS). Every packet authenticated. Same hardware, same speed.
 
-[![Crypto Tests](https://img.shields.io/badge/crypto%20tests-29%2F29%20pass-brightgreen?style=flat-square)](src/lib/MurmurEncrypt/)
+[![Crypto Tests](https://img.shields.io/badge/crypto%20tests-32%2F32%20pass-brightgreen?style=flat-square)](src/lib/MurmurEncrypt/)
 [![ASCON-128](https://img.shields.io/badge/ASCON--128%20AEAD-NIST%20SP%20800--232-blue?style=flat-square)](https://csrc.nist.gov/pubs/sp/800/232/ipd)
 [![Reddit](https://img.shields.io/badge/r%2Ffpv-423%2B%20upvotes-orange?style=flat-square&logo=reddit)](https://www.reddit.com/r/fpv/comments/1sl5hf1/)
 [![License](https://img.shields.io/github/license/PotatoSpudowski/MurmurLRS?style=flat-square)](https://github.com/PotatoSpudowski/MurmurLRS/blob/master/LICENSE)
@@ -88,7 +88,7 @@ cd src/lib/MurmurEncrypt
 make test
 ```
 
-29/29 tests pass, including official ASCON-128 test vectors.
+32/32 tests pass, including official ASCON-128 test vectors and OTA header-as-AD verification.
 
 <details>
 <summary>Technical details</summary>
