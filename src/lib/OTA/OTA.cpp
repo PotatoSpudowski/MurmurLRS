@@ -65,8 +65,8 @@ void MurmurResetCounter()
 
 static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktPtr)
 {
-    uint8_t header = ((uint8_t*)otaPktPtr)[0];
-    uint8_t ptype = header & 0x03;
+    uint8_t header = ((uint8_t*)otaPktPtr)[0] & 0x03;
+    uint8_t ptype = header;
 
     if (ptype == PACKET_TYPE_SYNC || !murmur_key_ready) {
         OriginalGenerateCrc(otaPktPtr);
@@ -97,8 +97,8 @@ static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktP
 
 static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktPtr)
 {
-    uint8_t header = ((uint8_t*)otaPktPtr)[0];
-    uint8_t ptype = header & 0x03;
+    uint8_t header = ((uint8_t*)otaPktPtr)[0] & 0x03;
+    uint8_t ptype = header;
 
     if (ptype == PACKET_TYPE_SYNC || !murmur_key_ready) {
         return OriginalValidateCrc(otaPktPtr);
