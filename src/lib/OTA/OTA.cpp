@@ -65,8 +65,8 @@ void MurmurResetCounter()
 
 static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktPtr)
 {
-    uint8_t header = ((uint8_t*)otaPktPtr)[0] & 0x03;
-    uint8_t ptype = header;
+    uint8_t raw_header = ((uint8_t*)otaPktPtr)[0];
+    uint8_t ptype = raw_header & 0x03;
 
     if (ptype == PACKET_TYPE_SYNC || !murmur_key_ready) {
         OriginalGenerateCrc(otaPktPtr);
@@ -79,16 +79,19 @@ static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktP
     uint8_t *payload = ((uint8_t*)otaPktPtr) + 1;
 
     if (OtaIsFullRes) {
+        /* OTA8: full byte 0 is stable — authenticate all header bits */
         uint8_t payload_len = OTA8_CRC_CALC_LEN - 1;
         uint16_t mac = murmur_encrypt_packet(murmur_key, counter,
-                                             header, direction,
+                                             raw_header, direction,
                                              payload, payload_len, 16);
         otaPktPtr->full.crc = mac;
     } else {
+        /* OTA4: byte 0 upper 6 bits are crcHigh (changes after encrypt).
+         * Use only the type bits as AD so TX and RX agree. */
         otaPktPtr->std.crcHigh = 0;
         uint8_t payload_len = OTA4_CRC_CALC_LEN - 1;
         uint16_t mac = murmur_encrypt_packet(murmur_key, counter,
-                                             header, direction,
+                                             ptype, direction,
                                              payload, payload_len, 14);
         otaPktPtr->std.crcHigh = (mac >> 8);
         otaPktPtr->std.crcLow = mac & 0xFF;
@@ -97,8 +100,8 @@ static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktP
 
 static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktPtr)
 {
-    uint8_t header = ((uint8_t*)otaPktPtr)[0] & 0x03;
-    uint8_t ptype = header;
+    uint8_t raw_header = ((uint8_t*)otaPktPtr)[0];
+    uint8_t ptype = raw_header & 0x03;
 
     if (ptype == PACKET_TYPE_SYNC || !murmur_key_ready) {
         return OriginalValidateCrc(otaPktPtr);
@@ -108,16 +111,19 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
     uint16_t received_mac;
     uint8_t payload_len;
     uint8_t mac_bits;
+    uint8_t ad_header;
 
     if (OtaIsFullRes) {
         received_mac = otaPktPtr->full.crc;
         payload_len = OTA8_CRC_CALC_LEN - 1;
         mac_bits = 16;
+        ad_header = raw_header;
     } else {
         received_mac = ((uint16_t)otaPktPtr->std.crcHigh << 8) | otaPktPtr->std.crcLow;
         otaPktPtr->std.crcHigh = 0;
         payload_len = OTA4_CRC_CALC_LEN - 1;
         mac_bits = 14;
+        ad_header = ptype;
     }
 
     uint32_t counter = MurmurGetCounter();
@@ -129,7 +135,7 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
 
     for (int i = 0; i < 3; i++) {
         if (candidates[i] == 0xFFFFFFFF) continue;
-        if (murmur_decrypt_packet(murmur_key, candidates[i], header, direction,
+        if (murmur_decrypt_packet(murmur_key, candidates[i], ad_header, direction,
                                   payload, payload_len, received_mac, mac_bits)) {
             if (!murmur_replay_check(&murmur_replay_state, candidates[i]))
                 return false;
