@@ -23,15 +23,16 @@ static bool     murmur_is_tx = false;
 static bool     murmur_key_ready = false;
 static murmur_replay_t murmur_replay_state;
 
+static bool     murmur_epoch_locked = false;
+static uint8_t  murmur_acquire_count = 0;
+static uint32_t murmur_acquire_epoch = 0;
+#define MURMUR_ACQUIRE_THRESHOLD 3
+
 static ValidatePacketCrc_t OriginalValidateCrc;
 static GeneratePacketCrc_t OriginalGenerateCrc;
 
-/* Derive 32-bit counter from OtaNonce + epoch.
- * Both TX and RX track OtaNonce identically (incremented every slot),
- * so both derive the same counter for any given slot. */
 static uint32_t ICACHE_RAM_ATTR MurmurGetCounter()
 {
-    /* Detect OtaNonce wraparound (255 -> 0) */
     if (OtaNonce < murmur_prev_nonce && (murmur_prev_nonce - OtaNonce) > 128) {
         murmur_nonce_epoch++;
     }
@@ -41,8 +42,6 @@ static uint32_t ICACHE_RAM_ATTR MurmurGetCounter()
 
 void MurmurInitFromUid(const uint8_t uid[6], bool is_tx)
 {
-    /* Derive encryption key from UID using ASCON-XOF (same KDF as murmur_derive_keys,
-     * but here we start from the UID rather than the binding phrase). */
     uint8_t derived[16];
     ascon_xof(uid, 6, derived, 16);
     memcpy(murmur_key, derived, 16);
@@ -50,16 +49,19 @@ void MurmurInitFromUid(const uint8_t uid[6], bool is_tx)
     murmur_nonce_epoch = 0;
     murmur_prev_nonce = 0;
     murmur_is_tx = is_tx;
+    murmur_epoch_locked = is_tx;
+    murmur_acquire_count = 0;
     murmur_replay_init(&murmur_replay_state);
     murmur_key_ready = true;
 }
 
-/* Reset epoch on SYNC resync or connection loss.
- * Must be called whenever OtaNonce is set (not just incremented). */
 void MurmurResetCounter()
 {
-    murmur_nonce_epoch = 0;
     murmur_prev_nonce = OtaNonce;
+    if (!murmur_is_tx) {
+        murmur_epoch_locked = false;
+        murmur_acquire_count = 0;
+    }
     murmur_replay_init(&murmur_replay_state);
 }
 
@@ -126,22 +128,48 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
         ad_header = ptype;
     }
 
-    uint32_t counter = MurmurGetCounter();
-    /* TX validates downlink (dir=1), RX validates uplink (dir=0) */
+    uint8_t nonce = OtaNonce;
     uint8_t direction = murmur_is_tx ? 1 : 0;
 
-    /* Try primary counter, then +/-1 epoch for edge cases around wraps */
-    uint32_t candidates[3] = { counter, counter + 256, (counter >= 256) ? counter - 256 : 0xFFFFFFFF };
+    if (murmur_epoch_locked) {
+        uint32_t counter = MurmurGetCounter();
+        uint32_t candidates[3] = { counter, counter + 256, (counter >= 256) ? counter - 256 : 0xFFFFFFFF };
 
-    for (int i = 0; i < 3; i++) {
-        if (candidates[i] == 0xFFFFFFFF) continue;
-        if (murmur_decrypt_packet(murmur_key, candidates[i], ad_header, direction,
+        for (int i = 0; i < 3; i++) {
+            if (candidates[i] == 0xFFFFFFFF) continue;
+            if (murmur_decrypt_packet(murmur_key, candidates[i], ad_header, direction,
+                                      payload, payload_len, received_mac, mac_bits)) {
+                if (!murmur_replay_check(&murmur_replay_state, candidates[i]))
+                    return false;
+                if (i == 1) murmur_nonce_epoch++;
+                else if (i == 2) murmur_nonce_epoch--;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* Acquisition mode: search epoch space to find TX's current epoch.
+     * Require MURMUR_ACQUIRE_THRESHOLD consecutive matches at the same
+     * epoch before locking in, to avoid false accepts with truncated MACs. */
+    for (uint32_t epoch = 0; epoch < 256; epoch++) {
+        uint32_t candidate = (epoch << 8) | (uint32_t)nonce;
+        if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
                                   payload, payload_len, received_mac, mac_bits)) {
-            if (!murmur_replay_check(&murmur_replay_state, candidates[i]))
-                return false;
-            /* Correct epoch if a fallback candidate matched */
-            if (i == 1) murmur_nonce_epoch++;
-            else if (i == 2) murmur_nonce_epoch--;
+            if (epoch == murmur_acquire_epoch) {
+                murmur_acquire_count++;
+            } else {
+                murmur_acquire_epoch = epoch;
+                murmur_acquire_count = 1;
+            }
+
+            if (murmur_acquire_count >= MURMUR_ACQUIRE_THRESHOLD) {
+                murmur_nonce_epoch = epoch;
+                murmur_prev_nonce = nonce;
+                murmur_epoch_locked = true;
+                murmur_replay_init(&murmur_replay_state);
+                murmur_replay_check(&murmur_replay_state, candidate);
+            }
             return true;
         }
     }
