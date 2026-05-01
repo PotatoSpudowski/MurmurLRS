@@ -2,6 +2,23 @@
 
 All notable changes to MurmurLRS are documented here.
 
+## v0.6 (2026-05-01)
+
+### Encryption fixes
+
+- Fix OTA4 authentication failure: header byte contamination from crcHigh bits caused every OTA4 packet MAC to fail. OTA4 now uses only packet type bits (2-bit) as AEAD associated data. OTA8 continues to authenticate the full header byte.
+- Fix epoch desync: TX and RX could permanently lose sync if TX had been running longer than RX (epoch drift). TX nonce space is now monotonic (never resets epoch). RX enters acquisition mode after SYNC — searches epoch 0-255 with 3-packet confirmation before locking in. No weakening of authentication.
+- 3 new OTA header-as-AD tests (32/32 total)
+
+### Upstream sync
+
+- Synced with upstream ExpressLRS (up to cf582b1b)
+- Separate FIFO locations for TX & RX on SX1280 (upstream PR #3620)
+- Reject unsupported rate switch from SYNC packet instead of crashing (upstream PR #3610)
+- Feature flag optimisation for web UI size reduction (upstream PR #3606)
+- VTX admin visibility fix (upstream PR #3608)
+- Web UI improvements: save button fixes, hardware page float support, lazy loading, reduced asset size, favicons
+
 ## v0.5.1 (2026-04-20)
 
 - Synced with upstream ExpressLRS (up to 87d2d4d3)
