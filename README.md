@@ -4,7 +4,7 @@
 
 Encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS). Every packet authenticated. Same hardware, same speed.
 
-[![Crypto Tests](https://img.shields.io/badge/crypto%20tests-32%2F32%20pass-brightgreen?style=flat-square)](src/lib/MurmurEncrypt/)
+[![Crypto Tests](https://img.shields.io/badge/crypto%20tests-41%2F41%20pass-brightgreen?style=flat-square)](src/lib/MurmurEncrypt/)
 [![ASCON-128](https://img.shields.io/badge/ASCON--128%20AEAD-NIST%20SP%20800--232-blue?style=flat-square)](https://csrc.nist.gov/pubs/sp/800/232/ipd)
 [![Reddit](https://img.shields.io/badge/r%2Ffpv-423%2B%20upvotes-orange?style=flat-square&logo=reddit)](https://www.reddit.com/r/fpv/comments/1sl5hf1/)
 [![License](https://img.shields.io/github/license/PotatoSpudowski/MurmurLRS?style=flat-square)](https://github.com/PotatoSpudowski/MurmurLRS/blob/master/LICENSE)
@@ -13,9 +13,15 @@ Encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS). Every packet a
 
 ---
 
-MurmurLRS is a fork of ExpressLRS that encrypts every packet between your transmitter and receiver. Nobody can sniff your stick inputs or inject commands into your link.
+MurmurLRS is a hardened fork of ExpressLRS. Same hardware, same configurator, same performance. Stock ELRS is not encrypted — anyone with an SDR can read your stick inputs or inject commands. MurmurLRS fixes that, and goes further.
 
-Works on all ELRS hardware. Same configurator. No performance loss.
+**Encrypted packets** (done) — Every packet is encrypted with ASCON-128 AEAD and authenticated with a 14-bit MAC. Your binding phrase becomes real key material via a KDF. Captured packets are ciphertext. Replayed or injected packets are rejected.
+
+**Unpredictable hop sequence** ([PR #5](https://github.com/PotatoSpudowski/MurmurLRS/pull/5), in progress) — Stock ELRS uses an invertible LCG for FHSS. Observe a few transmissions and you can reconstruct the full hop schedule. FHSSv2 replaces it with an ASCON-XOF CSPRNG keyed from the binding phrase, making the sequence cryptographically unpredictable.
+
+**Minimal transmit power** ([#8](https://github.com/PotatoSpudowski/MurmurLRS/issues/8), planned) — Stock ELRS dynamic power only steps down when telemetry arrives. If telemetry is sparse or stops, power stays where it is. SYNC packets are also sent at whatever power the TX is currently at. The planned stealth mode adds time-based power decay and caps SYNC at minimum power, reducing the detection radius of the link.
+
+---
 
 ## Getting started
 
@@ -88,7 +94,7 @@ cd src/lib/MurmurEncrypt
 make test
 ```
 
-32/32 tests pass, including official ASCON-128 test vectors and OTA header-as-AD verification.
+41/41 tests pass, including official ASCON-128 test vectors, OTA header-as-AD verification, and epoch acquisition state machine coverage.
 
 <details>
 <summary>Technical details</summary>
@@ -113,6 +119,10 @@ binding_phrase -> ASCON-XOF -> master_key -> ASCON-XOF -> enc_key (16B) + UID (6
 | `src/python/build_flags.py` | Auto-enable when binding phrase is set |
 | `src/src/tx_main.cpp` | Init at boot, counter reset on rate change |
 | `src/src/rx_main.cpp` | Init at boot, counter reset on SYNC/disconnect |
+
+**Epoch acquisition:**
+
+RX doesn't need to boot at the same time as TX. On connect, RX searches up to 256 possible epochs using a sliding window (16 epochs per packet), requiring 3 consecutive hits to lock. Handles ±1 nonce drift from timer convergence. If the link loses sync (e.g. TX reboot), RX falls back to acquisition after 16 consecutive failures.
 
 **Known limitations:**
 - 14-bit MAC (forgery probability: 1/16384 per attempt)

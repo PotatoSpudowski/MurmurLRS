@@ -2,6 +2,20 @@
 
 All notable changes to MurmurLRS are documented here.
 
+## v0.7 (2026-05-10)
+
+### Epoch acquisition state machine
+
+Fixes the "timing" bug where TX and RX only connect if powered on within ~1 second of each other. Previously, if TX had been running longer than RX, the RX could never find the correct encryption epoch.
+
+- **Sliding window epoch search**: RX scans 16 epochs per received packet, sliding forward on each miss. Finds any epoch within 16 packets worst-case (~32ms at 500Hz).
+- **Nonce-1 tolerance**: Acquisition accepts nonce or nonce-1 to handle ±1 drift during PFD phase-lock convergence.
+- **Consecutive-hit requirement**: 3 consecutive matches at the same epoch required to lock. Misses reset the count (prevents non-consecutive false hits from accumulating).
+- **Lock fallback**: If locked RX gets 16 consecutive decryption failures (TX rebooted at different epoch), drops back to acquisition instead of staying permanently stuck.
+- **MurmurSyncNonce**: SYNC packets in tentative state re-sync the nonce without resetting acquisition progress. Only a full disconnect triggers MurmurResetCounter.
+- ISR-safe: bounded to 32 decrypt attempts per packet (~0.7ms worst case at 500Hz)
+- 9 new acquisition mode tests (41/41 total)
+
 ## v0.6 (2026-05-01)
 
 ### Encryption fixes

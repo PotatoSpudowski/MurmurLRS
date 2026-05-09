@@ -25,8 +25,12 @@ static murmur_replay_t murmur_replay_state;
 
 static bool     murmur_epoch_locked = false;
 static uint8_t  murmur_acquire_count = 0;
-static uint32_t murmur_acquire_epoch = 0;
+static uint8_t  murmur_acquire_epoch = 0;
+static uint8_t  murmur_acquire_scan_pos = 0;
+static uint8_t  murmur_lock_fail_count = 0;
 #define MURMUR_ACQUIRE_THRESHOLD 3
+#define MURMUR_ACQUIRE_EPOCHS_PER_PACKET 16
+#define MURMUR_LOCK_FAIL_MAX 16
 
 static ValidatePacketCrc_t OriginalValidateCrc;
 static GeneratePacketCrc_t OriginalGenerateCrc;
@@ -51,6 +55,8 @@ void MurmurInitFromUid(const uint8_t uid[6], bool is_tx)
     murmur_is_tx = is_tx;
     murmur_epoch_locked = is_tx;
     murmur_acquire_count = 0;
+    murmur_acquire_scan_pos = 0;
+    murmur_lock_fail_count = 0;
     murmur_replay_init(&murmur_replay_state);
     murmur_key_ready = true;
 }
@@ -61,8 +67,15 @@ void MurmurResetCounter()
     if (!murmur_is_tx) {
         murmur_epoch_locked = false;
         murmur_acquire_count = 0;
+        murmur_acquire_scan_pos = 0;
+        murmur_lock_fail_count = 0;
     }
     murmur_replay_init(&murmur_replay_state);
+}
+
+void MurmurSyncNonce()
+{
+    murmur_prev_nonce = OtaNonce;
 }
 
 static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktPtr)
@@ -143,37 +156,57 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
                     return false;
                 if (i == 1) murmur_nonce_epoch++;
                 else if (i == 2) murmur_nonce_epoch--;
+                murmur_lock_fail_count = 0;
                 return true;
             }
+        }
+        if (++murmur_lock_fail_count >= MURMUR_LOCK_FAIL_MAX) {
+            murmur_epoch_locked = false;
+            murmur_acquire_count = 0;
+            murmur_acquire_scan_pos = 0;
+            murmur_lock_fail_count = 0;
         }
         return false;
     }
 
     /* Acquisition mode: search epoch space to find TX's current epoch.
+     * Try nonce and nonce-1 (timer may not have converged yet after SYNC).
+     * Search MURMUR_ACQUIRE_EPOCHS_PER_PACKET epochs per call to bound ISR time,
+     * cycling through the full 256 epoch space across multiple packets.
      * Require MURMUR_ACQUIRE_THRESHOLD consecutive matches at the same
      * epoch before locking in, to avoid false accepts with truncated MACs. */
-    for (uint32_t epoch = 0; epoch < 256; epoch++) {
-        uint32_t candidate = (epoch << 8) | (uint32_t)nonce;
-        if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
-                                  payload, payload_len, received_mac, mac_bits)) {
-            if (epoch == murmur_acquire_epoch) {
-                murmur_acquire_count++;
-            } else {
-                murmur_acquire_epoch = epoch;
-                murmur_acquire_count = 1;
-            }
+    uint8_t nonces[2] = { nonce, (uint8_t)(nonce - 1) };
+    uint8_t nonce_count = 2;
+    uint8_t scan_start = murmur_acquire_scan_pos;
 
-            if (murmur_acquire_count >= MURMUR_ACQUIRE_THRESHOLD) {
-                murmur_nonce_epoch = epoch;
-                murmur_prev_nonce = nonce;
-                murmur_epoch_locked = true;
-                murmur_replay_init(&murmur_replay_state);
-                murmur_replay_check(&murmur_replay_state, candidate);
+    for (uint8_t i = 0; i < MURMUR_ACQUIRE_EPOCHS_PER_PACKET; i++) {
+        uint32_t epoch = (scan_start + i) & 0xFF;
+        for (uint8_t n = 0; n < nonce_count; n++) {
+            uint32_t candidate = (epoch << 8) | (uint32_t)nonces[n];
+            if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
+                                      payload, payload_len, received_mac, mac_bits)) {
+                if (epoch == murmur_acquire_epoch) {
+                    murmur_acquire_count++;
+                } else {
+                    murmur_acquire_epoch = epoch;
+                    murmur_acquire_count = 1;
+                }
+
+                if (murmur_acquire_count >= MURMUR_ACQUIRE_THRESHOLD) {
+                    murmur_nonce_epoch = epoch;
+                    murmur_prev_nonce = nonces[n];
+                    murmur_epoch_locked = true;
+                    murmur_replay_init(&murmur_replay_state);
+                    murmur_replay_check(&murmur_replay_state, candidate);
+                }
+                murmur_acquire_scan_pos = epoch;
+                return true;
             }
-            return true;
         }
     }
 
+    murmur_acquire_count = 0;
+    murmur_acquire_scan_pos = (scan_start + MURMUR_ACQUIRE_EPOCHS_PER_PACKET) & 0xFF;
     return false;
 }
 #endif // MURMUR_ENCRYPT
