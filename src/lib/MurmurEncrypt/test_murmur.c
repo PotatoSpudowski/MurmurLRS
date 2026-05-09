@@ -345,6 +345,197 @@ static void test_key_independent(void)
 }
 
 /* ================================================================== */
+/*  FHSSv2 sequence generation                                         */
+/* ================================================================== */
+
+static void test_fhss_key_deterministic(void)
+{
+    TEST("FHSS key: deterministic from same UID");
+    uint8_t uid[6] = {0x01,0x02,0x03,0x04,0x05,0x06};
+    uint8_t k1[16], k2[16];
+    murmur_derive_fhss_key(uid, k1);
+    murmur_derive_fhss_key(uid, k2);
+    ASSERT_MEM_EQ(k1, k2, 16, "keys should match");
+    PASS();
+}
+
+static void test_fhss_key_different_uid(void)
+{
+    TEST("FHSS key: different UIDs produce different keys");
+    uint8_t uid1[6] = {0x01,0x02,0x03,0x04,0x05,0x06};
+    uint8_t uid2[6] = {0x06,0x05,0x04,0x03,0x02,0x01};
+    uint8_t k1[16], k2[16];
+    murmur_derive_fhss_key(uid1, k1);
+    murmur_derive_fhss_key(uid2, k2);
+    ASSERT_EQ(memcmp(k1, k2, 16) != 0, 1, "keys should differ");
+    PASS();
+}
+
+static void test_fhss_key_domain_separation(void)
+{
+    TEST("FHSS key: differs from encryption key");
+    uint8_t enc_key[16], uid[6], fhss_key[16];
+    murmur_derive_keys("test-phrase", enc_key, uid);
+    murmur_derive_fhss_key(uid, fhss_key);
+    ASSERT_EQ(memcmp(enc_key, fhss_key, 16) != 0, 1, "should differ");
+    PASS();
+}
+
+static void test_fhss_seq_deterministic(void)
+{
+    TEST("FHSS seq: deterministic for same key+domain");
+    uint8_t fhss_key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t seq1[256], seq2[256];
+    murmur_fhss_fill_sequence(fhss_key, 0, seq1, 240, 80, 40);
+    murmur_fhss_fill_sequence(fhss_key, 0, seq2, 240, 80, 40);
+    ASSERT_MEM_EQ(seq1, seq2, 240, "sequences should match");
+    PASS();
+}
+
+static void test_fhss_seq_sync_channel(void)
+{
+    TEST("FHSS seq: sync channel at start of every block");
+    uint8_t fhss_key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t seq[256];
+    uint8_t num_ch = 20;
+    uint8_t sync_ch = 10;
+    uint16_t seq_len = 240;
+    murmur_fhss_fill_sequence(fhss_key, 0, seq, seq_len, num_ch, sync_ch);
+    for (uint16_t i = 0; i < seq_len; i += num_ch) {
+        ASSERT_EQ(seq[i], sync_ch, "sync channel at block start");
+    }
+    PASS();
+}
+
+static void test_fhss_seq_no_repeats_in_block(void)
+{
+    TEST("FHSS seq: no repeated channels within a block");
+    uint8_t fhss_key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t seq[256];
+    uint8_t num_ch = 20;
+    uint16_t seq_len = 240;
+    murmur_fhss_fill_sequence(fhss_key, 0, seq, seq_len, num_ch, 10);
+    for (uint16_t block = 0; block < seq_len / num_ch; block++) {
+        uint8_t seen[256] = {0};
+        for (uint8_t j = 0; j < num_ch; j++) {
+            uint8_t ch = seq[block * num_ch + j];
+            ASSERT_EQ(seen[ch], 0, "channel repeated in block");
+            seen[ch] = 1;
+        }
+    }
+    PASS();
+}
+
+static void test_fhss_seq_all_channels_used(void)
+{
+    TEST("FHSS seq: all channels appear in each block");
+    uint8_t fhss_key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t seq[256];
+    uint8_t num_ch = 20;
+    uint16_t seq_len = 240;
+    murmur_fhss_fill_sequence(fhss_key, 0, seq, seq_len, num_ch, 10);
+    for (uint16_t block = 0; block < seq_len / num_ch; block++) {
+        uint8_t count[256] = {0};
+        for (uint8_t j = 0; j < num_ch; j++)
+            count[seq[block * num_ch + j]]++;
+        for (uint8_t ch = 0; ch < num_ch; ch++)
+            ASSERT_EQ(count[ch], 1, "channel missing from block");
+    }
+    PASS();
+}
+
+static void test_fhss_seq_3ch_rejection_sampling(void)
+{
+    TEST("FHSS seq: 3-channel domain (rejection sampling edge case)");
+    uint8_t fhss_key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t seq[256];
+    uint8_t num_ch = 3;
+    uint8_t sync_ch = 1;
+    uint16_t seq_len = 252;
+    murmur_fhss_fill_sequence(fhss_key, 0, seq, seq_len, num_ch, sync_ch);
+    for (uint16_t i = 0; i < seq_len; i += num_ch)
+        ASSERT_EQ(seq[i], sync_ch, "sync at block start");
+    for (uint16_t block = 0; block < seq_len / num_ch; block++) {
+        uint8_t seen[3] = {0};
+        for (uint8_t j = 0; j < num_ch; j++) {
+            uint8_t ch = seq[block * num_ch + j];
+            ASSERT_EQ(ch < num_ch, 1, "channel out of range");
+            ASSERT_EQ(seen[ch], 0, "channel repeated");
+            seen[ch] = 1;
+        }
+    }
+    PASS();
+}
+
+static void test_fhss_seq_different_domains(void)
+{
+    TEST("FHSS seq: different domain_id produces different sequence");
+    uint8_t fhss_key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t seq1[256], seq2[256];
+    murmur_fhss_fill_sequence(fhss_key, 0x00, seq1, 240, 80, 40);
+    murmur_fhss_fill_sequence(fhss_key, 0x01, seq2, 240, 80, 40);
+    ASSERT_EQ(memcmp(seq1, seq2, 240) != 0, 1, "should differ");
+    PASS();
+}
+
+static void test_fhss_seq_different_keys(void)
+{
+    TEST("FHSS seq: different keys produce different sequence");
+    uint8_t k1[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t k2[16] = {16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1};
+    uint8_t seq1[256], seq2[256];
+    murmur_fhss_fill_sequence(k1, 0, seq1, 240, 80, 40);
+    murmur_fhss_fill_sequence(k2, 0, seq2, 240, 80, 40);
+    ASSERT_EQ(memcmp(seq1, seq2, 240) != 0, 1, "should differ");
+    PASS();
+}
+
+static void test_fhss_seq_small_domain(void)
+{
+    TEST("FHSS seq: works with small channel count (4 channels)");
+    uint8_t fhss_key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t seq[256];
+    uint8_t num_ch = 4;
+    uint8_t sync_ch = 2;
+    uint16_t seq_len = 252;
+    murmur_fhss_fill_sequence(fhss_key, 0, seq, seq_len, num_ch, sync_ch);
+    for (uint16_t i = 0; i < seq_len; i += num_ch)
+        ASSERT_EQ(seq[i], sync_ch, "sync at block start");
+    for (uint16_t block = 0; block < seq_len / num_ch; block++) {
+        uint8_t seen[4] = {0};
+        for (uint8_t j = 0; j < num_ch; j++) {
+            uint8_t ch = seq[block * num_ch + j];
+            ASSERT_EQ(ch < num_ch, 1, "channel out of range");
+            ASSERT_EQ(seen[ch], 0, "channel repeated");
+            seen[ch] = 1;
+        }
+    }
+    PASS();
+}
+
+static void test_fhss_seq_80ch(void)
+{
+    TEST("FHSS seq: 80-channel 2.4GHz domain");
+    uint8_t fhss_key[16] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16};
+    uint8_t seq[256];
+    uint8_t num_ch = 80;
+    uint8_t sync_ch = 40;
+    uint16_t seq_len = 240;
+    murmur_fhss_fill_sequence(fhss_key, 0, seq, seq_len, num_ch, sync_ch);
+    ASSERT_EQ(seq[0], sync_ch, "sync at pos 0");
+    ASSERT_EQ(seq[80], sync_ch, "sync at pos 80");
+    ASSERT_EQ(seq[160], sync_ch, "sync at pos 160");
+    for (uint16_t block = 0; block < 3; block++) {
+        uint8_t count[80] = {0};
+        for (uint8_t j = 0; j < 80; j++)
+            count[seq[block * 80 + j]]++;
+        for (uint8_t ch = 0; ch < 80; ch++)
+            ASSERT_EQ(count[ch], 1, "missing or duplicated channel");
+    }
+    PASS();
+}
+
+/* ================================================================== */
 /*  Integration                                                        */
 /* ================================================================== */
 
@@ -486,6 +677,15 @@ int main(void)
     test_ota4_header_mismatch();
     test_ota4_header_masked_succeeds();
     test_ota8_full_header_authenticated();
+
+    printf("\n[FHSSv2 sequence generation]\n");
+    test_fhss_key_deterministic(); test_fhss_key_different_uid();
+    test_fhss_key_domain_separation();
+    test_fhss_seq_deterministic(); test_fhss_seq_sync_channel();
+    test_fhss_seq_no_repeats_in_block(); test_fhss_seq_all_channels_used();
+    test_fhss_seq_different_domains(); test_fhss_seq_different_keys();
+    test_fhss_seq_small_domain(); test_fhss_seq_3ch_rejection_sampling();
+    test_fhss_seq_80ch();
 
     printf("\n[Integration]\n");
     test_full_flow(); test_forgery_rejected();
