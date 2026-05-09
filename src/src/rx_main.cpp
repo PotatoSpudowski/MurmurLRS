@@ -1078,11 +1078,21 @@ static bool ICACHE_RAM_ATTR ProcessRfPacket_SYNC(uint32_t const now, OTA_Sync_s 
         || connectionHasModelMatch != modelMatched)
     {
         //DBGLN("\r\n%ux%ux%u", OtaNonce, otaSync->nonce, otaSync->fhssIndex);
+#if defined(MURMUR_ENCRYPT)
+        if (connectionState == disconnected) {
+            FHSSsetCurrIndex(otaSync->fhssIndex);
+            OtaNonce = otaSync->nonce;
+            extern void MurmurResetCounter();
+            MurmurResetCounter();
+        } else {
+            FHSSsetCurrIndex(otaSync->fhssIndex);
+            OtaNonce = otaSync->nonce;
+            extern void MurmurSyncNonce();
+            MurmurSyncNonce();
+        }
+#else
         FHSSsetCurrIndex(otaSync->fhssIndex);
         OtaNonce = otaSync->nonce;
-#if defined(MURMUR_ENCRYPT)
-        extern void MurmurResetCounter();
-        MurmurResetCounter();
 #endif
         TentativeConnection(now);
         // connectionHasModelMatch must come after TentativeConnection, which resets it
