@@ -15,11 +15,11 @@ Encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS). Every packet a
 
 MurmurLRS is a hardened fork of ExpressLRS. Same hardware, same configurator, same performance. Stock ELRS is not encrypted — anyone with an SDR can read your stick inputs or inject commands. MurmurLRS fixes that, and goes further.
 
-**Encrypted packets** (done) — Every packet is encrypted with ASCON-128 AEAD and authenticated with a 14-bit MAC. Your binding phrase becomes real key material via a KDF. Captured packets are ciphertext. Replayed or injected packets are rejected.
+- **Encrypted packets** (done) — Every packet is encrypted with ASCON-128 AEAD and authenticated with a 14-bit MAC. Your binding phrase becomes real key material via a KDF. Captured packets are ciphertext. Replayed or injected packets are rejected.
 
-**Unpredictable hop sequence** ([PR #5](https://github.com/PotatoSpudowski/MurmurLRS/pull/5), in progress) — Stock ELRS uses an invertible LCG for FHSS. Observe a few transmissions and you can reconstruct the full hop schedule. FHSSv2 replaces it with an ASCON-XOF CSPRNG keyed from the binding phrase, making the sequence cryptographically unpredictable.
+- **Unpredictable hop sequence** ([PR #5](https://github.com/PotatoSpudowski/MurmurLRS/pull/5), in progress) — Stock ELRS uses an invertible LCG for FHSS. Observe a few transmissions and you can reconstruct the full hop schedule. FHSSv2 replaces it with an ASCON-XOF CSPRNG keyed from the binding phrase, making the sequence cryptographically unpredictable.
 
-**Minimal transmit power** ([#8](https://github.com/PotatoSpudowski/MurmurLRS/issues/8), planned) — Stock ELRS dynamic power only steps down when telemetry arrives. If telemetry is sparse or stops, power stays where it is. SYNC packets are also sent at whatever power the TX is currently at. The planned stealth mode adds time-based power decay and caps SYNC at minimum power, reducing the detection radius of the link.
+- **RF emission control** ([#8](https://github.com/PotatoSpudowski/MurmurLRS/issues/8), planned) — Minimize unnecessary RF output from both ends of the link. Time-based power decay ramps TX down to minimum even without telemetry feedback (stock ELRS stays at max if telemetry stops). SYNC packets are capped at minimum power since they go out on 4 fixed known frequencies. Configurable telemetry modes: full (default), minimal (critical alerts only), and silent (uplink-only, zero RX-side emissions) — bidirectional telemetry doubles the RF footprint of the link, and other hardened forks disable it entirely for this reason.
 
 ---
 
