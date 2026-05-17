@@ -4,7 +4,7 @@
 
 Encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS). Every packet authenticated. Same hardware, same speed.
 
-[![Crypto Tests](https://img.shields.io/badge/crypto%20tests-41%2F41%20pass-brightgreen?style=flat-square)](src/lib/MurmurEncrypt/)
+[![Crypto Tests](https://img.shields.io/badge/crypto%20tests-50%2F50%20pass-brightgreen?style=flat-square)](src/lib/MurmurEncrypt/)
 [![ASCON-128](https://img.shields.io/badge/ASCON--128%20AEAD-NIST%20SP%20800--232-blue?style=flat-square)](https://csrc.nist.gov/pubs/sp/800/232/ipd)
 [![Reddit](https://img.shields.io/badge/r%2Ffpv-423%2B%20upvotes-orange?style=flat-square&logo=reddit)](https://www.reddit.com/r/fpv/comments/1sl5hf1/)
 [![License](https://img.shields.io/github/license/PotatoSpudowski/MurmurLRS?style=flat-square)](https://github.com/PotatoSpudowski/MurmurLRS/blob/master/LICENSE)
@@ -94,7 +94,7 @@ cd src/lib/MurmurEncrypt
 make test
 ```
 
-41/41 tests pass, including official ASCON-128 test vectors, OTA header-as-AD verification, and epoch acquisition state machine coverage.
+50/50 tests pass, including official ASCON-128 test vectors, OTA header-as-AD verification, epoch acquisition state machine, and 5-minute overflow regression tests.
 
 <details>
 <summary>Technical details</summary>
@@ -122,7 +122,7 @@ binding_phrase -> ASCON-XOF -> master_key -> ASCON-XOF -> enc_key (16B) + UID (6
 
 **Epoch acquisition:**
 
-RX doesn't need to boot at the same time as TX. On connect, RX searches up to 256 possible epochs using a sliding window (16 epochs per packet), requiring 3 consecutive hits to lock. Handles ±1 nonce drift from timer convergence. If the link loses sync (e.g. TX reboot), RX falls back to acquisition after 16 consecutive failures.
+RX doesn't need to boot at the same time as TX. On connect, RX searches the full 32-bit epoch space using a sliding window (16 epochs per packet), requiring 3 consecutive hits to lock. Handles ±1 nonce drift from timer convergence. If the link loses sync (e.g. TX reboot), RX falls back to acquisition after 16 consecutive failures, scanning forward from near the last known epoch and wrapping to 0 after 256 epochs without a hit. MurmurTrackNonce keeps the RX epoch synchronized during RF dropouts.
 
 **Known limitations:**
 - 14-bit MAC (forgery probability: 1/16384 per attempt)

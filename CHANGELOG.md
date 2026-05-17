@@ -2,6 +2,21 @@
 
 All notable changes to MurmurLRS are documented here.
 
+## v0.8 (2026-05-17)
+
+### Fix: link dies after 5 minutes at 500Hz
+
+Bug reported by community tester: LQ drops to 0-2 after ~131 seconds at 500Hz. Root cause: 8-bit epoch masking in acquisition mode. After 65536 packets (131s at 500Hz), `murmur_nonce_epoch` exceeds 255. Acquisition searched `epoch & 0xFF`, so it could never find the correct counter.
+
+- **32-bit epoch acquisition**: Removed `& 0xFF` mask. Acquisition state (`acquire_epoch`, `acquire_scan_pos`) widened to `uint32_t`.
+- **Outward-spiral locked search**: Replaced linear ±256 search with outward spiral (±1, ±2, ... ±4 epochs). Eliminates MAC false-positive ordering issues.
+- **Nonce-1 epoch boundary fix**: When `nonce=0`, `nonce-1=255` correctly uses the previous epoch for decryption.
+- **Acquisition threshold gate**: Acquisition no longer returns `true` on single MAC hits. Requires 3 consecutive same-epoch matches before passing packets upward.
+- **MurmurTrackNonce**: ISR hook on OtaNonce++ keeps RX epoch synchronized during RF dropout, preventing multi-epoch drift on signal recovery.
+- **TX reboot recovery (scan wrap)**: If acquisition scans 256 epochs forward without locking, wraps scan position to 0. Handles TX reboot while RX was at high epoch.
+- **MurmurResetCounter resets epoch to 0**: Handles TX reboot on full disconnect path.
+- 50 total tests (32 crypto + 10 acquisition + 8 epoch overflow regression)
+
 ## v0.7 (2026-05-10)
 
 ### Epoch acquisition state machine

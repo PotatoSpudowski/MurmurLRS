@@ -25,12 +25,14 @@ static murmur_replay_t murmur_replay_state;
 
 static bool     murmur_epoch_locked = false;
 static uint8_t  murmur_acquire_count = 0;
-static uint8_t  murmur_acquire_epoch = 0;
-static uint8_t  murmur_acquire_scan_pos = 0;
+static uint32_t murmur_acquire_epoch = 0;
+static uint32_t murmur_acquire_scan_pos = 0;
+static uint32_t murmur_acquire_scan_origin = 0;
 static uint8_t  murmur_lock_fail_count = 0;
 #define MURMUR_ACQUIRE_THRESHOLD 3
 #define MURMUR_ACQUIRE_EPOCHS_PER_PACKET 16
 #define MURMUR_LOCK_FAIL_MAX 16
+#define MURMUR_ACQUIRE_SCAN_RANGE 256
 
 static ValidatePacketCrc_t OriginalValidateCrc;
 static GeneratePacketCrc_t OriginalGenerateCrc;
@@ -67,7 +69,9 @@ void MurmurResetCounter()
     if (!murmur_is_tx) {
         murmur_epoch_locked = false;
         murmur_acquire_count = 0;
+        murmur_nonce_epoch = 0;
         murmur_acquire_scan_pos = 0;
+        murmur_acquire_scan_origin = 0;
         murmur_lock_fail_count = 0;
     }
     murmur_replay_init(&murmur_replay_state);
@@ -76,6 +80,13 @@ void MurmurResetCounter()
 void MurmurSyncNonce()
 {
     murmur_prev_nonce = OtaNonce;
+}
+
+void ICACHE_RAM_ATTR MurmurTrackNonce()
+{
+    if (!murmur_key_ready)
+        return;
+    (void)MurmurGetCounter();
 }
 
 static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktPtr)
@@ -146,24 +157,58 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
 
     if (murmur_epoch_locked) {
         uint32_t counter = MurmurGetCounter();
-        uint32_t candidates[3] = { counter, counter + 256, (counter >= 256) ? counter - 256 : 0xFFFFFFFF };
+        uint32_t expected_epoch = counter >> 8;
 
-        for (int i = 0; i < 3; i++) {
-            if (candidates[i] == 0xFFFFFFFF) continue;
-            if (murmur_decrypt_packet(murmur_key, candidates[i], ad_header, direction,
-                                      payload, payload_len, received_mac, mac_bits)) {
-                if (!murmur_replay_check(&murmur_replay_state, candidates[i]))
-                    return false;
-                if (i == 1) murmur_nonce_epoch++;
-                else if (i == 2) murmur_nonce_epoch--;
-                murmur_lock_fail_count = 0;
-                return true;
+        /* Fast path: try expected epoch with primary nonce */
+        uint32_t candidate = (expected_epoch << 8) | (uint32_t)nonce;
+        if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
+                                  payload, payload_len, received_mac, mac_bits)) {
+            if (!murmur_replay_check(&murmur_replay_state, candidate))
+                return false;
+            murmur_lock_fail_count = 0;
+            return true;
+        }
+
+        /* Outward spiral: ±1, ±2, ... ±4 epochs with primary nonce only */
+        for (uint32_t d = 1; d <= 4; d++) {
+            uint32_t epochs[2] = { expected_epoch + d,
+                                   (expected_epoch >= d) ? expected_epoch - d : 0xFFFFFFFF };
+            for (int e = 0; e < 2; e++) {
+                if (epochs[e] == 0xFFFFFFFF) continue;
+                candidate = (epochs[e] << 8) | (uint32_t)nonce;
+                if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
+                                          payload, payload_len, received_mac, mac_bits)) {
+                    if (!murmur_replay_check(&murmur_replay_state, candidate))
+                        return false;
+                    murmur_nonce_epoch = epochs[e];
+                    murmur_prev_nonce = nonce;
+                    murmur_lock_fail_count = 0;
+                    return true;
+                }
             }
         }
+
+        /* Last resort: nonce-1 (PFD timer drift).
+         * If nonce=0, nonce-1=255 belongs to the previous epoch. */
+        uint8_t nonce_m1 = (uint8_t)(nonce - 1);
+        uint32_t nonce_m1_epoch = (nonce == 0 && expected_epoch > 0)
+                                  ? expected_epoch - 1 : expected_epoch;
+        candidate = (nonce_m1_epoch << 8) | (uint32_t)nonce_m1;
+        if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
+                                  payload, payload_len, received_mac, mac_bits)) {
+            if (!murmur_replay_check(&murmur_replay_state, candidate))
+                return false;
+            murmur_nonce_epoch = nonce_m1_epoch;
+            murmur_prev_nonce = nonce_m1;
+            murmur_lock_fail_count = 0;
+            return true;
+        }
+
         if (++murmur_lock_fail_count >= MURMUR_LOCK_FAIL_MAX) {
             murmur_epoch_locked = false;
             murmur_acquire_count = 0;
-            murmur_acquire_scan_pos = 0;
+            murmur_acquire_scan_pos = (murmur_nonce_epoch > 4) ? murmur_nonce_epoch - 4 : 0;
+            murmur_acquire_scan_origin = murmur_acquire_scan_pos;
             murmur_lock_fail_count = 0;
         }
         return false;
@@ -172,15 +217,15 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
     /* Acquisition mode: search epoch space to find TX's current epoch.
      * Try nonce and nonce-1 (timer may not have converged yet after SYNC).
      * Search MURMUR_ACQUIRE_EPOCHS_PER_PACKET epochs per call to bound ISR time,
-     * cycling through the full 256 epoch space across multiple packets.
+     * scanning forward from last known position (32-bit, no wrap masking).
      * Require MURMUR_ACQUIRE_THRESHOLD consecutive matches at the same
      * epoch before locking in, to avoid false accepts with truncated MACs. */
     uint8_t nonces[2] = { nonce, (uint8_t)(nonce - 1) };
     uint8_t nonce_count = 2;
-    uint8_t scan_start = murmur_acquire_scan_pos;
+    uint32_t scan_start = murmur_acquire_scan_pos;
 
     for (uint8_t i = 0; i < MURMUR_ACQUIRE_EPOCHS_PER_PACKET; i++) {
-        uint32_t epoch = (scan_start + i) & 0xFF;
+        uint32_t epoch = scan_start + i;
         for (uint8_t n = 0; n < nonce_count; n++) {
             uint32_t candidate = (epoch << 8) | (uint32_t)nonces[n];
             if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
@@ -198,15 +243,20 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
                     murmur_epoch_locked = true;
                     murmur_replay_init(&murmur_replay_state);
                     murmur_replay_check(&murmur_replay_state, candidate);
+                    return true;
                 }
                 murmur_acquire_scan_pos = epoch;
-                return true;
+                return false;
             }
         }
     }
 
     murmur_acquire_count = 0;
-    murmur_acquire_scan_pos = (scan_start + MURMUR_ACQUIRE_EPOCHS_PER_PACKET) & 0xFF;
+    murmur_acquire_scan_pos = scan_start + MURMUR_ACQUIRE_EPOCHS_PER_PACKET;
+    if (murmur_acquire_scan_pos - murmur_acquire_scan_origin >= MURMUR_ACQUIRE_SCAN_RANGE) {
+        murmur_acquire_scan_pos = 0;
+        murmur_acquire_scan_origin = 0;
+    }
     return false;
 }
 #endif // MURMUR_ENCRYPT

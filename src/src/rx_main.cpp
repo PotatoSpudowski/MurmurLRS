@@ -775,6 +775,10 @@ void ICACHE_RAM_ATTR HWtimerCallbackTock()
     sendImmediateRC();
 
     OtaNonce++;
+#if defined(MURMUR_ENCRYPT)
+    extern void MurmurTrackNonce();
+    MurmurTrackNonce();
+#endif
     HandleFHSS();
     updateDiversity();
     bool tlmSent = HandleSendDataDl();
