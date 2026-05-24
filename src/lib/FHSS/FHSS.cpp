@@ -131,13 +131,13 @@ void FHSSrandomiseFHSSsequence(const uint32_t seed)
 }
 
 #if defined(MURMUR_ENCRYPT)
-void FHSSrandomiseFHSSsequenceSecure(const uint8_t uid[6])
+void FHSSrandomiseFHSSsequenceSecure(const uint8_t enc_key[16])
 {
     FHSSinitDomainConfig();
     FHSSptr = 0;
 
     uint8_t fhss_key[16];
-    murmur_derive_fhss_key(uid, fhss_key);
+    murmur_derive_fhss_key(enc_key, fhss_key);
 
     murmur_fhss_fill_sequence(fhss_key, 0x00, FHSSsequence,
                               primaryBandCount, FHSSconfig->freq_count, sync_channel);

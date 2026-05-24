@@ -63,6 +63,11 @@ void MurmurInitFromUid(const uint8_t uid[6], bool is_tx)
     murmur_key_ready = true;
 }
 
+void MurmurGetEncKey(uint8_t out[16])
+{
+    memcpy(out, murmur_key, 16);
+}
+
 void MurmurResetCounter()
 {
     murmur_prev_nonce = OtaNonce;
@@ -75,6 +80,13 @@ void MurmurResetCounter()
         murmur_lock_fail_count = 0;
     }
     murmur_replay_init(&murmur_replay_state);
+}
+
+void ICACHE_RAM_ATTR MurmurTrackNonce()
+{
+    if (!murmur_key_ready)
+        return;
+    (void)MurmurGetCounter();
 }
 
 void MurmurSyncNonce()
@@ -188,8 +200,7 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
             }
         }
 
-        /* Last resort: nonce-1 (PFD timer drift).
-         * If nonce=0, nonce-1=255 belongs to the previous epoch. */
+        /* Last resort: nonce-1 (PFD timer drift) */
         uint8_t nonce_m1 = (uint8_t)(nonce - 1);
         uint32_t nonce_m1_epoch = (nonce == 0 && expected_epoch > 0)
                                   ? expected_epoch - 1 : expected_epoch;

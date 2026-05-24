@@ -51,7 +51,7 @@ bool murmur_decrypt_packet(const uint8_t enc_key[16],
 /*  FHSS sequence generation (ASCON-XOF keyed CSPRNG)                  */
 /* ------------------------------------------------------------------ */
 
-void murmur_derive_fhss_key(const uint8_t uid[6], uint8_t fhss_key[16]);
+void murmur_derive_fhss_key(const uint8_t enc_key[16], uint8_t fhss_key[16]);
 
 void murmur_fhss_fill_sequence(const uint8_t fhss_key[16],
                                uint8_t domain_id,

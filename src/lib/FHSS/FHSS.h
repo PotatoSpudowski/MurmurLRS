@@ -58,7 +58,7 @@ void FHSSrandomiseFHSSsequence(uint32_t seed);
 void FHSSrandomiseFHSSsequenceBuild(uint32_t seed, uint32_t freqCount, uint_fast8_t sync_channel, uint8_t *sequence);
 
 #if defined(MURMUR_ENCRYPT)
-void FHSSrandomiseFHSSsequenceSecure(const uint8_t uid[6]);
+void FHSSrandomiseFHSSsequenceSecure(const uint8_t enc_key[16]);
 #endif
 
 // add domain info for Lua

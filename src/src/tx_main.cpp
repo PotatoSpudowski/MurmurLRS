@@ -1422,8 +1422,9 @@ void setup()
     setupBindingFromConfig();
 #if defined(MURMUR_ENCRYPT)
     extern void MurmurInitFromUid(const uint8_t uid[6], bool is_tx);
+    extern void MurmurGetEncKey(uint8_t out[16]);
     MurmurInitFromUid(UID, true);
-    FHSSrandomiseFHSSsequenceSecure(UID);
+    { uint8_t ek[16]; MurmurGetEncKey(ek); FHSSrandomiseFHSSsequenceSecure(ek); }
     DBGLN("MurmurLRS: encryption + FHSSv2 active (TX)");
 #else
     FHSSrandomiseFHSSsequence(OtaGetUidSeed());

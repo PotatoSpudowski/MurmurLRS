@@ -350,23 +350,23 @@ static void test_key_independent(void)
 
 static void test_fhss_key_deterministic(void)
 {
-    TEST("FHSS key: deterministic from same UID");
-    uint8_t uid[6] = {0x01,0x02,0x03,0x04,0x05,0x06};
+    TEST("FHSS key: deterministic from same enc_key");
+    uint8_t enc_key[16] = {0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0x10};
     uint8_t k1[16], k2[16];
-    murmur_derive_fhss_key(uid, k1);
-    murmur_derive_fhss_key(uid, k2);
+    murmur_derive_fhss_key(enc_key, k1);
+    murmur_derive_fhss_key(enc_key, k2);
     ASSERT_MEM_EQ(k1, k2, 16, "keys should match");
     PASS();
 }
 
-static void test_fhss_key_different_uid(void)
+static void test_fhss_key_different_enc_key(void)
 {
-    TEST("FHSS key: different UIDs produce different keys");
-    uint8_t uid1[6] = {0x01,0x02,0x03,0x04,0x05,0x06};
-    uint8_t uid2[6] = {0x06,0x05,0x04,0x03,0x02,0x01};
+    TEST("FHSS key: different enc_keys produce different keys");
+    uint8_t ek1[16] = {0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,0x10};
+    uint8_t ek2[16] = {0x10,0x0f,0x0e,0x0d,0x0c,0x0b,0x0a,0x09,0x08,0x07,0x06,0x05,0x04,0x03,0x02,0x01};
     uint8_t k1[16], k2[16];
-    murmur_derive_fhss_key(uid1, k1);
-    murmur_derive_fhss_key(uid2, k2);
+    murmur_derive_fhss_key(ek1, k1);
+    murmur_derive_fhss_key(ek2, k2);
     ASSERT_EQ(memcmp(k1, k2, 16) != 0, 1, "keys should differ");
     PASS();
 }
@@ -376,7 +376,7 @@ static void test_fhss_key_domain_separation(void)
     TEST("FHSS key: differs from encryption key");
     uint8_t enc_key[16], uid[6], fhss_key[16];
     murmur_derive_keys("test-phrase", enc_key, uid);
-    murmur_derive_fhss_key(uid, fhss_key);
+    murmur_derive_fhss_key(enc_key, fhss_key);
     ASSERT_EQ(memcmp(enc_key, fhss_key, 16) != 0, 1, "should differ");
     PASS();
 }
@@ -679,7 +679,7 @@ int main(void)
     test_ota8_full_header_authenticated();
 
     printf("\n[FHSSv2 sequence generation]\n");
-    test_fhss_key_deterministic(); test_fhss_key_different_uid();
+    test_fhss_key_deterministic(); test_fhss_key_different_enc_key();
     test_fhss_key_domain_separation();
     test_fhss_seq_deterministic(); test_fhss_seq_sync_channel();
     test_fhss_seq_no_repeats_in_block(); test_fhss_seq_all_channels_used();

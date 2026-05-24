@@ -110,13 +110,14 @@ bool murmur_decrypt_packet(const uint8_t enc_key[16],
 /*  FHSS sequence generation (ASCON-XOF keyed CSPRNG)                  */
 /* ------------------------------------------------------------------ */
 
-void murmur_derive_fhss_key(const uint8_t uid[6], uint8_t fhss_key[16])
+void murmur_derive_fhss_key(const uint8_t enc_key[16], uint8_t fhss_key[16])
 {
-    /* Domain-separated: "MurmurFHSS" || uid → ASCON-XOF → 16-byte key */
-    uint8_t input[10 + 6];
+    /* Domain-separated: "MurmurFHSS" || enc_key → ASCON-XOF → 16-byte key
+     * Uses full 128-bit encryption key as input material, not the weak 48-bit UID. */
+    uint8_t input[10 + 16];
     memcpy(input, "MurmurFHSS", 10);
-    memcpy(input + 10, uid, 6);
-    ascon_xof(input, 16, fhss_key, 16);
+    memcpy(input + 10, enc_key, 16);
+    ascon_xof(input, 26, fhss_key, 16);
 }
 
 void murmur_fhss_fill_sequence(const uint8_t fhss_key[16],
@@ -149,38 +150,34 @@ void murmur_fhss_fill_sequence(const uint8_t fhss_key[16],
             sequence[i] = i % num_channels;
     }
 
-    /* Fisher-Yates shuffle each block using rejection-sampled random indices.
-     * Rejection sampling eliminates modulo bias: we discard values >= threshold
-     * where threshold is the largest multiple of (num_channels-1) that fits in 256. */
-    uint8_t range = num_channels - 1;
-    /* Use uint16_t: when range divides 256, 256 % range == 0 and threshold == 256,
-     * which overflows uint8_t to 0 (every sample would be rejected). */
-    uint16_t threshold = 256 - (256 % range);
+    /* Fisher-Yates shuffle each block (positions 1..num_channels-1, position 0 is sync).
+     * Iterate backwards: for position j, pick a random index in [1, j] and swap.
+     * This produces a uniform permutation of the non-sync slots. */
     uint16_t buf_idx = 0;
 
-    for (uint16_t i = 0; i < seq_len; i++) {
-        if (i % num_channels == 0)
-            continue;
-
-        /* Get an unbiased random value in [0, range) via rejection sampling */
-        uint8_t rand_val;
-        uint8_t retries = 0;
-        do {
-            if (buf_idx >= buf_len) {
-                /* Exhausted buffer — regenerate with incremented domain */
-                xof_input[22]++;
-                ascon_xof(xof_input, 23, buf, buf_len);
-                buf_idx = 0;
+    for (uint16_t block = 0; block < seq_len / num_channels; block++) {
+        uint16_t offset = block * num_channels;
+        for (uint8_t j = num_channels - 1; j >= 2; j--) {
+            /* Need unbiased random in [1, j] — range is j values */
+            uint8_t range = j;
+            uint16_t threshold = 256 - (256 % range);
+            uint8_t rand_val;
+            for (;;) {
+                if (buf_idx >= buf_len) {
+                    xof_input[22]++;
+                    ascon_xof(xof_input, 23, buf, buf_len);
+                    buf_idx = 0;
+                }
+                rand_val = buf[buf_idx++];
+                if (rand_val < threshold)
+                    break;
             }
-            rand_val = buf[buf_idx++];
-            retries++;
-        } while (rand_val >= threshold && retries < 16);
-        uint8_t r = (rand_val % range) + 1;
+            uint8_t k = (rand_val % range) + 1;
 
-        uint16_t offset = (i / num_channels) * num_channels;
-        uint8_t temp = sequence[i];
-        sequence[i] = sequence[offset + r];
-        sequence[offset + r] = temp;
+            uint8_t temp = sequence[offset + j];
+            sequence[offset + j] = sequence[offset + k];
+            sequence[offset + k] = temp;
+        }
     }
 }
 
