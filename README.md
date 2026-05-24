@@ -4,7 +4,7 @@
 
 Encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS). Every packet authenticated. Same hardware, same speed.
 
-[![Crypto Tests](https://img.shields.io/badge/crypto%20tests-50%2F50%20pass-brightgreen?style=flat-square)](src/lib/MurmurEncrypt/)
+[![Crypto Tests](https://img.shields.io/badge/crypto%20tests-52%2F52%20pass-brightgreen?style=flat-square)](src/lib/MurmurEncrypt/)
 [![ASCON-128](https://img.shields.io/badge/ASCON--128%20AEAD-NIST%20SP%20800--232-blue?style=flat-square)](https://csrc.nist.gov/pubs/sp/800/232/ipd)
 [![Reddit](https://img.shields.io/badge/r%2Ffpv-423%2B%20upvotes-orange?style=flat-square&logo=reddit)](https://www.reddit.com/r/fpv/comments/1sl5hf1/)
 [![License](https://img.shields.io/github/license/PotatoSpudowski/MurmurLRS?style=flat-square)](https://github.com/PotatoSpudowski/MurmurLRS/blob/master/LICENSE)
@@ -13,13 +13,39 @@ Encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS). Every packet a
 
 ---
 
-MurmurLRS is a hardened fork of ExpressLRS. Same hardware, same configurator, same performance. Stock ELRS is not encrypted — anyone with an SDR can read your stick inputs or inject commands. MurmurLRS fixes that, and goes further.
+MurmurLRS is a hardened fork of ExpressLRS. Same hardware, same configurator, same performance. Stock ELRS isn't encrypted. Anyone with an SDR can read your stick inputs or inject commands. MurmurLRS fixes that.
 
-- **Encrypted packets** (done) — Every packet is encrypted with ASCON-128 AEAD and authenticated with a 14-bit MAC. Your binding phrase becomes real key material via a KDF. Captured packets are ciphertext. Replayed or injected packets are rejected.
+## Features
 
-- **Unpredictable hop sequence** ([PR #5](https://github.com/PotatoSpudowski/MurmurLRS/pull/5), in progress) — Stock ELRS uses an invertible LCG for FHSS. Observe a few transmissions and you can reconstruct the full hop schedule. FHSSv2 replaces it with an ASCON-XOF CSPRNG keyed from the binding phrase, making the sequence cryptographically unpredictable.
+### Shipped
 
-- **RF emission control** ([#8](https://github.com/PotatoSpudowski/MurmurLRS/issues/8), planned) — Minimize unnecessary RF output from both ends of the link. Time-based power decay ramps TX down to minimum even without telemetry feedback (stock ELRS stays at max if telemetry stops). SYNC packets are capped at minimum power since they go out on 4 fixed known frequencies. Configurable telemetry modes: full (default), minimal (critical alerts only), and silent (uplink-only, zero RX-side emissions) — bidirectional telemetry doubles the RF footprint of the link, and other hardened forks disable it entirely for this reason.
+- **ASCON-128 AEAD encryption.** Every RC packet is encrypted and authenticated. Your binding phrase goes through an ASCON-XOF KDF to produce real 128-bit keys. Captured packets are just ciphertext. Tampered or replayed packets get rejected. Zero extra bytes on the wire because the MAC replaces the CRC field.
+
+- **Cryptographic FHSS (FHSSv2).** Stock ELRS uses an invertible LCG for frequency hopping. Watch a few transmissions and you can reconstruct the full hop schedule. We replaced it with an ASCON-XOF keyed CSPRNG and Fisher-Yates shuffled blocks. The hop sequence derives from the 128-bit encryption key with proper domain separation, so it's unpredictable even if you're watching every transmission.
+
+- **Replay protection.** 64-packet sliding window with a 32-bit monotonic counter. Out-of-order packets within the window are fine. Duplicates and stale packets get dropped.
+
+- **Epoch acquisition.** RX doesn't need to boot at the same time as TX. On connect, RX searches the full 32-bit epoch space with a sliding window (16 epochs per packet) and needs 3 consecutive hits to lock. Handles reboots, signal dropouts, and long continuous sessions without losing sync.
+
+- **Anti-spoofing.** Every non-SYNC packet carries a keyed authentication tag. Commands from someone who doesn't know the binding phrase get rejected. There's no protocol downgrade path.
+
+### Roadmap
+
+- **Adaptive TX power** ([#8](https://github.com/PotatoSpudowski/MurmurLRS/issues/8)). Three-priority dynamic power: emergency ramp on LQ drop, RSSI-based stepping, and power decay when the link is healthy. Stock ELRS skips the decay step. This reduces unnecessary RF output and saves battery.
+
+- **Telemetry modes.** Full (default), minimal (critical alerts only), or silent (uplink-only, zero RX emissions). Bidirectional telemetry doubles the link's RF footprint. Silent mode halves it.
+
+- **SYNC power cap.** SYNC packets go out on known fixed frequencies. Capping them at minimum power reduces RF exposure during connection establishment.
+
+- **Multi-band hopping (LR1121).** Hop across 433/868/915/2400 MHz simultaneously on tri-band hardware. Narrowband interference only hits one band at a time, so cross-band hopping makes the link much harder to disrupt.
+
+- **Repeater mode.** A relay node retransmits control packets, extending range beyond line-of-sight without extra ground infrastructure.
+
+- **Swarm ID.** Multiple RX addresses on one TX. One operator, multiple craft, no channel conflicts.
+
+- **Extended failsafe.** Stock ELRS failsafes in about 1 second on signal loss. Extended failsafe holds last commands for 10-20s so the craft can clear interference or return home.
+
+- **Forward secrecy.** Session key ratchet so compromise of one session doesn't expose past or future traffic.
 
 ---
 
@@ -30,7 +56,7 @@ git clone https://github.com/PotatoSpudowski/MurmurLRS
 ```
 
 1. Open [ELRS Configurator](https://github.com/ExpressLRS/ExpressLRS-Configurator/releases)
-2. Go to **Local** tab, point it at the `src` folder
+2. Go to the **Local** tab, point it at the `src` folder
 3. Set your binding phrase (3-4 random words minimum, same on TX and RX)
 4. Flash TX, flash RX
 
@@ -50,7 +76,7 @@ Both TX and RX must run MurmurLRS. A MurmurLRS device won't link with stock ELRS
 
 ## How it works
 
-Your binding phrase becomes your encryption key. In stock ELRS it's just for pairing. In MurmurLRS it's fed through a key derivation function to produce real cryptographic keys.
+Your binding phrase becomes your encryption key. In stock ELRS it's just for pairing. In MurmurLRS it gets fed through a key derivation function to produce real cryptographic material.
 
 ```
 TX:  RC data -> encrypt + authenticate -> transmit
@@ -61,7 +87,7 @@ Zero extra bytes. Same packet structure. Same air rate. The authentication tag r
 
 ## Performance
 
-Identical to stock ELRS. The encryption adds ~22 microseconds per packet. At 500 Hz that's 1.3% CPU. You won't notice it.
+Identical to stock ELRS. Encryption adds about 22 microseconds per packet. At 500 Hz that's 1.3% CPU. You won't notice it.
 
 | | MurmurLRS | Stock ELRS |
 |:--|:--|:--|
@@ -72,16 +98,18 @@ Identical to stock ELRS. The encryption adds ~22 microseconds per packet. At 500
 
 ## vs PrivacyLRS
 
-Both add encryption to ELRS. The difference is authentication.
+Both add encryption to ELRS. The differences are authentication and FHSS.
 
 | | MurmurLRS | PrivacyLRS |
 |:--|:--|:--|
 | Cipher | ASCON-128 AEAD | ChaCha20 |
-| Authentication | Yes (keyed) | No (CRC only) |
+| Authentication | Yes (keyed MAC) | No (CRC only) |
 | Tampered packets | Rejected | Accepted silently |
-| Replay protection | 64-packet window | 8-bit counter |
+| Replay protection | 64-packet sliding window | 8-bit counter |
+| FHSS | ASCON-XOF CSPRNG (unpredictable) | LCG (invertible) |
+| Adaptive TX power | Planned | None |
 
-PrivacyLRS encrypts. MurmurLRS encrypts and authenticates. If someone flips bits in your encrypted packet, MurmurLRS rejects it. PrivacyLRS can't tell.
+PrivacyLRS encrypts. MurmurLRS encrypts, authenticates, and hides the hop pattern. If someone flips bits in your encrypted packet, MurmurLRS rejects it. If someone watches your transmissions, they still can't predict where you'll hop next.
 
 ## Hardware
 
@@ -94,7 +122,7 @@ cd src/lib/MurmurEncrypt
 make test
 ```
 
-50/50 tests pass, including official ASCON-128 test vectors, OTA header-as-AD verification, epoch acquisition state machine, and 5-minute overflow regression tests.
+52/52 tests pass. Covers ASCON-128 NIST vectors, OTA header authentication, FHSSv2 sequence generation, epoch acquisition, and 10-minute stress tests.
 
 <details>
 <summary>Technical details</summary>
@@ -104,7 +132,11 @@ make test
 **Key derivation:**
 ```
 binding_phrase -> ASCON-XOF -> master_key -> ASCON-XOF -> enc_key (16B) + UID (6B)
+enc_key -> ASCON-XOF("MurmurFHSS" || enc_key) -> fhss_key (16B)
+fhss_key -> ASCON-XOF("FHSSv1" || fhss_key || domain_id) -> hop sequence
 ```
+
+**FHSS:** Cryptographic hop sequence via ASCON-XOF CSPRNG. Rejection sampling eliminates modulo bias. Fisher-Yates shuffle per block. Domain separation for dual-band (LR1121).
 
 **Replay protection:** 64-packet sliding window with 32-bit counter reconstructed from 8-bit OtaNonce
 
@@ -114,21 +146,21 @@ binding_phrase -> ASCON-XOF -> master_key -> ASCON-XOF -> enc_key (16B) + UID (6
 
 | File | What |
 |:--|:--|
-| `src/lib/MurmurEncrypt/*` | Encryption module (~400 LOC, pure C) |
-| `src/lib/OTA/OTA.cpp` | Encrypt/decrypt wrapping, counter tracking |
+| `src/lib/MurmurEncrypt/*` | Encryption + FHSS module (~500 LOC, pure C) |
+| `src/lib/FHSS/FHSS.cpp` | Secure FHSS sequence generation (FHSSv2) |
+| `src/lib/OTA/OTA.cpp` | Encrypt/decrypt hooks, counter tracking |
 | `src/python/build_flags.py` | Auto-enable when binding phrase is set |
 | `src/src/tx_main.cpp` | Init at boot, counter reset on rate change |
 | `src/src/rx_main.cpp` | Init at boot, counter reset on SYNC/disconnect |
 
 **Epoch acquisition:**
 
-RX doesn't need to boot at the same time as TX. On connect, RX searches the full 32-bit epoch space using a sliding window (16 epochs per packet), requiring 3 consecutive hits to lock. Handles ±1 nonce drift from timer convergence. If the link loses sync (e.g. TX reboot), RX falls back to acquisition after 16 consecutive failures, scanning forward from near the last known epoch and wrapping to 0 after 256 epochs without a hit. MurmurTrackNonce keeps the RX epoch synchronized during RF dropouts.
+RX doesn't need to boot at the same time as TX. On connect, it searches the full 32-bit epoch space with a sliding window (16 epochs per packet) and requires 3 consecutive hits to lock. Handles nonce drift from timer convergence. If the link loses sync (say TX reboots), RX falls back to acquisition after 16 consecutive failures, scans forward from near the last known epoch, and wraps to 0 after 256 epochs without a hit. MurmurTrackNonce keeps the RX epoch in sync during signal dropouts.
 
 **Known limitations:**
 - 14-bit MAC (forgery probability: 1/16384 per attempt)
 - SYNC packets are cleartext (needed for connection establishment)
-- No forward secrecy
-- LCG hop sequence inherited from ELRS (see [#3](https://github.com/PotatoSpudowski/MurmurLRS/issues/3))
+- No forward secrecy yet (session key ratchet is on the roadmap)
 
 </details>
 
@@ -136,7 +168,7 @@ RX doesn't need to boot at the same time as TX. On connect, RX searches the full
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- **Flash and test** -- report what works and breaks
+- **Flash and test** -- report what works and what breaks
 - **Review the crypto** -- under 500 lines of C in `src/lib/MurmurEncrypt/`
 - **ESP8285/ESP32-S3/C3 testing** -- primary dev is on ESP32
 
