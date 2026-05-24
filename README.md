@@ -35,7 +35,7 @@ MurmurLRS is a hardened fork of ExpressLRS. Same hardware, same configurator, sa
 
 - **Telemetry modes** ([#9](https://github.com/PotatoSpudowski/MurmurLRS/issues/9)). Full (default), minimal (critical alerts only), or silent (uplink-only, zero RX emissions). Bidirectional telemetry doubles the link's RF footprint. Silent mode halves it.
 
-- **Multi-band hopping** ([#10](https://github.com/PotatoSpudowski/MurmurLRS/issues/10)). Hop across 433/868/915/2400 MHz simultaneously on LR1121 tri-band hardware. Narrowband interference only hits one band at a time, so cross-band hopping makes the link much harder to disrupt.
+- **N-band diversity** ([#10](https://github.com/PotatoSpudowski/MurmurLRS/issues/10)). ELRS Gemini supports 2 simultaneous bands. We're generalizing to 3+. Add a third LR1121 for 433 MHz and all three bands transmit every hop. An adversary must jam all bands at once to kill the link.
 
 - **Repeater mode** ([#11](https://github.com/PotatoSpudowski/MurmurLRS/issues/11)). A relay node retransmits control packets, extending range beyond line-of-sight without extra ground infrastructure.
 
