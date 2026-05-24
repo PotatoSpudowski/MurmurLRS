@@ -33,19 +33,17 @@ MurmurLRS is a hardened fork of ExpressLRS. Same hardware, same configurator, sa
 
 - **Adaptive TX power** ([#8](https://github.com/PotatoSpudowski/MurmurLRS/issues/8)). Three-priority dynamic power: emergency ramp on LQ drop, RSSI-based stepping, and power decay when the link is healthy. Stock ELRS skips the decay step. This reduces unnecessary RF output and saves battery.
 
-- **Telemetry modes.** Full (default), minimal (critical alerts only), or silent (uplink-only, zero RX emissions). Bidirectional telemetry doubles the link's RF footprint. Silent mode halves it.
+- **Telemetry modes** ([#9](https://github.com/PotatoSpudowski/MurmurLRS/issues/9)). Full (default), minimal (critical alerts only), or silent (uplink-only, zero RX emissions). Bidirectional telemetry doubles the link's RF footprint. Silent mode halves it.
 
-- **SYNC power cap.** SYNC packets go out on known fixed frequencies. Capping them at minimum power reduces RF exposure during connection establishment.
+- **Multi-band hopping** ([#10](https://github.com/PotatoSpudowski/MurmurLRS/issues/10)). Hop across 433/868/915/2400 MHz simultaneously on LR1121 tri-band hardware. Narrowband interference only hits one band at a time, so cross-band hopping makes the link much harder to disrupt.
 
-- **Multi-band hopping (LR1121).** Hop across 433/868/915/2400 MHz simultaneously on tri-band hardware. Narrowband interference only hits one band at a time, so cross-band hopping makes the link much harder to disrupt.
+- **Repeater mode** ([#11](https://github.com/PotatoSpudowski/MurmurLRS/issues/11)). A relay node retransmits control packets, extending range beyond line-of-sight without extra ground infrastructure.
 
-- **Repeater mode.** A relay node retransmits control packets, extending range beyond line-of-sight without extra ground infrastructure.
+- **Swarm ID** ([#12](https://github.com/PotatoSpudowski/MurmurLRS/issues/12)). Multiple RX addresses on one TX. One operator, multiple craft, no channel conflicts.
 
-- **Swarm ID.** Multiple RX addresses on one TX. One operator, multiple craft, no channel conflicts.
+- **Extended failsafe** ([#13](https://github.com/PotatoSpudowski/MurmurLRS/issues/13)). Stock ELRS failsafes in about 1 second on signal loss. Extended failsafe holds last commands for 10-20s so the craft can clear interference or return home.
 
-- **Extended failsafe.** Stock ELRS failsafes in about 1 second on signal loss. Extended failsafe holds last commands for 10-20s so the craft can clear interference or return home.
-
-- **Forward secrecy.** Session key ratchet so compromise of one session doesn't expose past or future traffic.
+- **Forward secrecy** ([#14](https://github.com/PotatoSpudowski/MurmurLRS/issues/14)). Session key ratchet so compromise of one session doesn't expose past or future traffic.
 
 ---
 
