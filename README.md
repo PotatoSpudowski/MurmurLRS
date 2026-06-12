@@ -41,8 +41,6 @@ MurmurLRS is a hardened fork of ExpressLRS. Same hardware, same configurator, sa
 
 - **Swarm ID** ([#12](https://github.com/PotatoSpudowski/MurmurLRS/issues/12)). Multiple RX addresses on one TX. One operator, multiple craft, no channel conflicts.
 
-- **Extended failsafe** ([#13](https://github.com/PotatoSpudowski/MurmurLRS/issues/13)). Stock ELRS failsafes in about 1 second on signal loss. Extended failsafe holds last commands for 10-20s so the craft can clear interference or return home.
-
 - **Forward secrecy** ([#14](https://github.com/PotatoSpudowski/MurmurLRS/issues/14)). Session key ratchet so compromise of one session doesn't expose past or future traffic.
 
 ---
