@@ -88,6 +88,8 @@ Zero extra bytes. Same packet structure. Same air rate. The authentication tag r
 - SYNC packets remain cleartext and use the stock CRC; they are not authenticated by the packet AEAD.
 - No forward secrecy is implemented. The project does not claim resistance to physical key extraction, jamming, or all packet injection attacks.
 
+An [experimental session core](src/lib/MurmurSession/README.md) now tests authenticated two-way challenge exchange, separate directional keys, and retry-safe confirmation. It is not wired into the radio firmware; the boot/session limitations above remain.
+
 These constraints need to be considered together; cipher test vectors alone do not establish the security of the radio protocol. See [the PrivacyLRS discussion](https://github.com/PotatoSpudowski/MurmurLRS/issues/16) and [session-key proposal](https://github.com/PotatoSpudowski/MurmurLRS/issues/14).
 
 ## Hardware and performance

@@ -4,6 +4,8 @@ All notable changes to MurmurLRS are documented here.
 
 ## Unreleased
 
+- Added an experimental HMAC-SHA-256/HKDF session core with two-sided freshness, confirmation, direction-separated keys, bounded six-byte fragmentation, protocol vectors, and sanitizer tests. It is not yet integrated into the live radio path.
+
 - Derive firmware encryption keys from the complete build-time phrase rather than the six-byte ELRS UID. Both endpoints must be rebuilt; older encrypted firmware is incompatible.
 - Require a nonempty phrase for encrypted builds and keep generated key material out of compiler flags and build logs.
 - Track TX counter wraps on timer ticks, including periods with no transmitted packets.

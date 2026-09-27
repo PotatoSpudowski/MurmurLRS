@@ -25,11 +25,22 @@ jobs:
       - run: python -m pip install platformio==6.1.19
       - name: Test build-time key provisioning
         run: python -m unittest discover -s src/python/tests -p 'test_murmur_key.py'
-      - name: Test production encrypted OTA hooks
+      - name: Test production OTA hooks and experimental session core
         working-directory: src
         env:
           MURMUR_BINDING_PHRASE: ci-only-not-a-secret
         run: pio test -e native_murmur
+      - name: Sanitize session parser, framing, and handshake
+        working-directory: src
+        run: |
+          g++ -std=c++11 -O1 -g -DMURMUR_ENCRYPT -DMURMUR_SESSION_STANDALONE \
+            -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
+            -Ilib/MurmurSession -I.pio/libdeps/native_murmur/Unity/src \
+            test/test_murmur_session/test_session.cpp lib/MurmurSession/MurmurSession.cpp \
+            lib/MurmurSession/vendor/SHA256.cpp lib/MurmurSession/vendor/Hash.cpp \
+            lib/MurmurSession/vendor/Crypto.cpp .pio/libdeps/native_murmur/Unity/src/unity.c \
+            -o /tmp/murmur-session-tests
+          /tmp/murmur-session-tests
 
   encrypted-firmware:
     runs-on: ubuntu-latest
