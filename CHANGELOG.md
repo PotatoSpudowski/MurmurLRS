@@ -2,6 +2,15 @@
 
 All notable changes to MurmurLRS are documented here.
 
+## Unreleased
+
+- Fixed the duplicate `MurmurTrackNonce` definition that prevented encrypted firmware builds (#17).
+- Restored ESP8285 TX EEPROM initialization and separate backpack/USB UARTs on classic ESP32.
+- Added a dedicated CI workflow for crypto tests and six explicitly encrypted firmware builds.
+- Added experimental non-PA LilyGO T3-S3 LR1121 TX/RX bench targets, a checked-in 2.4 GHz hardware profile, and an optional TX free-run mode.
+- Documented the ExpressLRS 4.1.0-derived upstream base (#18), actual UID-based key derivation, short authentication tags, and session/nonce limitations.
+- Added a repeatable two-board bench procedure in `bench/lilygo-t3s3.md`.
+
 ## v0.8 (2026-05-17)
 
 ### Fix: link dies after 5 minutes at 500Hz
