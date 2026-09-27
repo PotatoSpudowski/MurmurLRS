@@ -1,4 +1,4 @@
-# Experimental authenticated session core
+# Authenticated session core
 
 This module implements and tests a session handshake and bounded message framing.
 **It is not connected to the firmware's OTA callbacks or hardware RNG.** Current
@@ -19,8 +19,8 @@ Sharing a PSK with other devices makes those devices equally trusted. It does no
 protect against PSK/flash extraction, a compromised endpoint, weak phrases,
 traffic analysis, jamming, or resource exhaustion by a nearby transmitter. It
 has **no forward secrecy**: captured challenges plus a later PSK compromise are
-sufficient to derive past traffic keys. This is an experimental protocol, not an
-externally reviewed or standardized key exchange.
+sufficient to derive past traffic keys. The protocol has not undergone external
+security review and is not a standardized key exchange.
 
 ## Version 1 messages
 

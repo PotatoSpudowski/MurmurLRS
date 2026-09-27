@@ -2,7 +2,7 @@
 
 <img alt="MurmurLRS" src="/docs/logo.svg" width="50%" height="50%">
 
-Experimental encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS) with keyed frequency hopping.
+Encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS) with keyed frequency hopping.
 
 [![Murmur encrypted checks](https://github.com/PotatoSpudowski/MurmurLRS/actions/workflows/murmur.yml/badge.svg)](https://github.com/PotatoSpudowski/MurmurLRS/actions/workflows/murmur.yml)
 [![Ascon-128](https://img.shields.io/badge/cipher-Ascon--128-blue?style=flat-square)](src/lib/MurmurEncrypt/)
@@ -13,7 +13,7 @@ Experimental encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS) wi
 
 ---
 
-MurmurLRS adds Ascon-128 packet encryption, truncated authentication tags, and keyed frequency hopping to ExpressLRS. Packet sizes stay unchanged; cleartext SYNC packets are still used for connection establishment. This is a research/hobby implementation, with security limitations described below.
+MurmurLRS is an open-source radio-link security project that adds Ascon-128 packet encryption, truncated authentication tags, and keyed frequency hopping to ExpressLRS. Packet sizes stay unchanged; cleartext SYNC packets are still used for connection establishment. Protocol guarantees and current limitations are documented below.
 
 ## Upstream compatibility
 
@@ -67,7 +67,7 @@ For command-line builds, set `MURMUR_BINDING_PHRASE` in the environment, then ru
 
 **Migration:** rebuild and flash both endpoints. The full-phrase key format is incompatible with older UID-derived firmware, even for the same phrase. Changing the phrase in the device's WiFi UI changes ELRS binding settings but does not replace the compiled encryption key; rebuild both endpoints to change that key. Firmware images and build directories contain the key and must be treated as secret.
 
-Experimental non-PA LilyGO T3-S3 LR1121 TX/RX targets are defined in [lilygo-bench.ini](src/targets/lilygo-bench.ini), with a checked-in 2.4 GHz hardware profile.
+Non-PA LilyGO T3-S3 LR1121 TX/RX targets are defined in [lilygo-bench.ini](src/targets/lilygo-bench.ini), with a checked-in 2.4 GHz hardware profile. Both roles are compiled in CI; over-the-air hardware validation is pending.
 
 ## How it works
 
@@ -88,7 +88,7 @@ Zero extra bytes. Same packet structure. Same air rate. The authentication tag r
 - SYNC packets remain cleartext and use the stock CRC; they are not authenticated by the packet AEAD.
 - No forward secrecy is implemented. The project does not claim resistance to physical key extraction, jamming, or all packet injection attacks.
 
-An [experimental session core](src/lib/MurmurSession/README.md) now tests authenticated two-way challenge exchange, separate directional keys, and retry-safe confirmation. It is not wired into the radio firmware; the boot/session limitations above remain.
+The [authenticated session core](src/lib/MurmurSession/README.md) implements two-way challenge exchange, separate directional keys, and retry-safe confirmation, with 16 protocol and framing tests plus sanitizer coverage. Firmware integration is the next milestone: connecting the core to the radio transport and hardware RNG. Until that integration is complete, the boot/session limitations above apply to the firmware.
 
 These constraints need to be considered together; cipher test vectors alone do not establish the security of the radio protocol. See [the PrivacyLRS discussion](https://github.com/PotatoSpudowski/MurmurLRS/issues/16) and [session-key proposal](https://github.com/PotatoSpudowski/MurmurLRS/issues/14).
 
