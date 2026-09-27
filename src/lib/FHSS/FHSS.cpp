@@ -14,12 +14,14 @@ extern "C" {
 #define POWER_OUTPUT_VALUES_DUAL_COUNT 0
 #endif
 
-#if defined(RADIO_SX127X) || defined(RADIO_LR1121)
+#if defined(RADIO_SX127X) || defined(RADIO_LR1121) || defined(RADIO_LR2021)
 
-#if defined(RADIO_LR1121)
+#if defined(RADIO_SX127X)
+#include "SX127xDriver.h"
+#elif defined(RADIO_LR1121)
 #include "LR1121Driver.h"
 #else
-#include "SX127xDriver.h"
+#include "LR2021Driver.h"
 #endif
 
 const fhss_config_t domains[] = {
@@ -31,9 +33,11 @@ const fhss_config_t domains[] = {
     {"EU433",  FREQ_HZ_TO_REG_VAL(433100000), FREQ_HZ_TO_REG_VAL(434450000), 3, 434000000},
     {"US433",  FREQ_HZ_TO_REG_VAL(433250000), FREQ_HZ_TO_REG_VAL(438000000), 8, 434000000},
     {"US433W",  FREQ_HZ_TO_REG_VAL(423500000), FREQ_HZ_TO_REG_VAL(438000000), 20, 434000000},
+    // Thailand NBTC 920-925 MHz: 8 FHSS channels, 600 kHz spacing
+    {"TH920",  FREQ_HZ_TO_REG_VAL(920500000), FREQ_HZ_TO_REG_VAL(924700000), 8, 922600000},
 };
 
-#if defined(RADIO_LR1121)
+#if defined(RADIO_LR1121) || defined(RADIO_LR2021)
 const fhss_config_t domainsDualBand[] = {
     {
     #if defined(Regulatory_Domain_EU_CE_2400)
@@ -96,19 +100,20 @@ char version_domain[VERSION_DOMAIN_MAXLEN] {};
 
 static void FHSSinitDomainConfig()
 {
+    // the hop pointer indexes sequences that are about to be replaced
+    FHSSptr = 0;
+
     FHSSconfig = &domains[firmwareOptions.domain];
     sync_channel = FHSSconfig->freq_count / 2;
     freq_spread = (FHSSconfig->freq_stop - FHSSconfig->freq_start) * FREQ_SPREAD_SCALE / (FHSSconfig->freq_count - 1);
-    primaryBandCount = (FHSS_SEQUENCE_LEN / FHSSconfig->freq_count) * FHSSconfig->freq_count;
 
     DBGLN("Primary Domain %s, %u channels, sync=%u",
         FHSSconfig->domain, FHSSconfig->freq_count, sync_channel);
 
-#if defined(RADIO_LR1121)
+#if defined(RADIO_LR1121) || defined(RADIO_LR2021)
     FHSSconfigDualBand = &domainsDualBand[0];
     sync_channel_DualBand = FHSSconfigDualBand->freq_count / 2;
     freq_spread_DualBand = (FHSSconfigDualBand->freq_stop - FHSSconfigDualBand->freq_start) * FREQ_SPREAD_SCALE / (FHSSconfigDualBand->freq_count - 1);
-    secondaryBandCount = (FHSS_SEQUENCE_LEN / FHSSconfigDualBand->freq_count) * FHSSconfigDualBand->freq_count;
 
     DBGLN("Dual Domain %s, %u channels, sync=%u",
         FHSSconfigDualBand->domain, FHSSconfigDualBand->freq_count, sync_channel_DualBand);
@@ -119,12 +124,10 @@ void FHSSrandomiseFHSSsequence(const uint32_t seed)
 {
     FHSSinitDomainConfig();
 
-    FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfig->freq_count, sync_channel, FHSSsequence);
+    primaryBandCount = FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfig->freq_count, sync_channel, FHSSsequence);
 
-#if defined(RADIO_LR1121)
-    FHSSusePrimaryFreqBand = false;
-    FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfigDualBand->freq_count, sync_channel_DualBand, FHSSsequence_DualBand);
-    FHSSusePrimaryFreqBand = true;
+#if defined(RADIO_LR1121) || defined(RADIO_LR2021)
+    secondaryBandCount = FHSSrandomiseFHSSsequenceBuild(seed, FHSSconfigDualBand->freq_count, sync_channel_DualBand, FHSSsequence_DualBand);
 #endif
 
     addDomainInfo(version_domain, VERSION_DOMAIN_MAXLEN);
@@ -134,21 +137,20 @@ void FHSSrandomiseFHSSsequence(const uint32_t seed)
 void FHSSrandomiseFHSSsequenceSecure(const uint8_t enc_key[16])
 {
     FHSSinitDomainConfig();
-    FHSSptr = 0;
 
     uint8_t fhss_key[16];
     murmur_derive_fhss_key(enc_key, fhss_key);
 
+    primaryBandCount = (FHSS_SEQUENCE_LEN / FHSSconfig->freq_count) * FHSSconfig->freq_count;
     murmur_fhss_fill_sequence(fhss_key, 0x00, FHSSsequence,
                               primaryBandCount, FHSSconfig->freq_count, sync_channel);
 
     DBGLN("FHSSv2: ASCON-XOF CSPRNG sequence generated (primary)");
 
-#if defined(RADIO_LR1121)
-    FHSSusePrimaryFreqBand = false;
+#if defined(RADIO_LR1121) || defined(RADIO_LR2021)
+    secondaryBandCount = (FHSS_SEQUENCE_LEN / FHSSconfigDualBand->freq_count) * FHSSconfigDualBand->freq_count;
     murmur_fhss_fill_sequence(fhss_key, 0x01, FHSSsequence_DualBand,
                               secondaryBandCount, FHSSconfigDualBand->freq_count, sync_channel_DualBand);
-    FHSSusePrimaryFreqBand = true;
     DBGLN("FHSSv2: ASCON-XOF CSPRNG sequence generated (dual-band)");
 #endif
 
@@ -169,14 +171,14 @@ Approach:
   another random entry, excluding the sync channel.
 
 */
-void FHSSrandomiseFHSSsequenceBuild(const uint32_t seed, uint32_t freqCount, uint_fast8_t syncChannel, uint8_t *inSequence)
+uint16_t FHSSrandomiseFHSSsequenceBuild(const uint32_t seed, uint32_t freqCount, uint_fast8_t syncChannel, uint8_t *inSequence)
 {
-    // reset the pointer (otherwise the tests fail)
-    FHSSptr = 0;
+    const uint16_t sequenceCount = (FHSS_SEQUENCE_LEN / freqCount) * freqCount;
+
     rngSeed(seed);
 
     // initialize the sequence array
-    for (uint16_t i = 0; i < FHSSgetSequenceCount(); i++)
+    for (uint16_t i = 0; i < sequenceCount; i++)
     {
         if (i % freqCount == 0) {
             inSequence[i] = syncChannel;
@@ -187,7 +189,7 @@ void FHSSrandomiseFHSSsequenceBuild(const uint32_t seed, uint32_t freqCount, uin
         }
     }
 
-    for (uint16_t i = 0; i < FHSSgetSequenceCount(); i++)
+    for (uint16_t i = 0; i < sequenceCount; i++)
     {
         // if it's not the sync channel
         if (i % freqCount != 0)
@@ -203,13 +205,15 @@ void FHSSrandomiseFHSSsequenceBuild(const uint32_t seed, uint32_t freqCount, uin
     }
 
     // output FHSS sequence
-    // for (uint16_t i=0; i < FHSSgetSequenceCount(); i++)
+    // for (uint16_t i=0; i < sequenceCount; i++)
     // {
     //     DBG("%u ",inSequence[i]);
     //     if (i % 10 == 9)
     //         DBGCR;
     // }
     // DBGCR;
+
+    return sequenceCount;
 }
 
 /**

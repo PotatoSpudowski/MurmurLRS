@@ -119,7 +119,7 @@ void SerialMavlink::sendQueuedData(uint32_t maxBytesToSend)
     mavlinkOutputBuffer.popBytes(apBuf, size);
     mavlinkOutputBuffer.unlock();
 
-    for (uint8_t i = 0; i < size; ++i)
+    for (uint16_t i = 0; i < size; ++i)
     {
         uint8_t c = apBuf[i];
 
@@ -127,7 +127,7 @@ void SerialMavlink::sendQueuedData(uint32_t maxBytesToSend)
         mavlink_status_t status;
 
         // Try parse a mavlink message
-        if (mavlink_frame_char(MAVLINK_COMM_0, c, &msg, &status))
+        if (mavlink_frame_char(MAVLINK_COMM_0, c, &msg, &status) == MAVLINK_FRAMING_OK)
         {
             // Message decoded successfully
 

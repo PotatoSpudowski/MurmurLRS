@@ -171,7 +171,6 @@ public:
     void SetLinkMode(uint8_t linkMode);
     void SetModelMatch(bool modelMatch);
     void SetDefaults(bool commit);
-    void SetStorageProvider(ELRS_EEPROM *eeprom);
     void SetVtxBand(uint8_t vtxBand);
     void SetVtxChannel(uint8_t vtxChannel);
     void SetVtxPower(uint8_t vtxPower);
@@ -193,19 +192,18 @@ public:
     bool SetModelId(uint8_t modelId);
 
 private:
-#if !defined(PLATFORM_ESP32)
-    void UpgradeEepromV5ToV6();
-    void UpgradeEepromV6ToV7();
-    void UpgradeEepromV7ToV8();
-#endif
 
     tx_config_t m_config;
-    ELRS_EEPROM *m_eeprom;
     uint32_t     m_modified;
     model_config_t *m_model;
     uint8_t     m_modelId;
 #if defined(PLATFORM_ESP32)
     nvs_handle  handle;
+#else
+    ELRS_EEPROM m_eeprom;
+    void UpgradeEepromV5ToV6();
+    void UpgradeEepromV6ToV7();
+    void UpgradeEepromV7ToV8();
 #endif
 };
 
@@ -252,14 +250,15 @@ typedef struct __attribute__((packed)) {
     } vbat;
     uint8_t     bindStorage:2,     // rx_config_bindstorage_t
                 power:4,
-                antennaMode:2;      // 0=0, 1=1, 2=Diversity
+                antennaMode:2;      // 0=Antenna 1, 1=Antenna 2, 2=Diversity
     uint8_t     powerOnCounter:2,
                 forceTlmOff:1,
                 rateInitialIdx:5;   // Rate to start rateCycling at on boot
     uint8_t     modelId;
     uint8_t     serialProtocol:4,
                 failsafeMode:2,
-                unused:2;
+                antennaGroup:1,
+                unused:1;
     rx_config_pwm_t pwmChannels[PWM_MAX_CHANNELS] __attribute__((aligned(4)));
     uint8_t     teamraceChannel:4,
                 teamracePosition:3,
@@ -288,6 +287,7 @@ public:
     uint8_t  GetModelId() const { return m_config.modelId; }
     uint8_t GetPower() const { return m_config.power; }
     uint8_t GetAntennaMode() const { return m_config.antennaMode; }
+    uint8_t GetAntennaGroup() const { return m_config.antennaGroup; }
     bool     IsModified() const { return m_modified != 0; }
     const rx_config_pwm_t *GetPwmChannel(uint8_t ch) const { return &m_config.pwmChannels[ch]; }
     bool GetForceTlmOff() const { return m_config.forceTlmOff; }
@@ -310,6 +310,7 @@ public:
     void SetModelId(uint8_t modelId);
     void SetPower(uint8_t power);
     void SetAntennaMode(uint8_t antennaMode);
+    void SetAntennaGroup(uint8_t antennaGroup);
     void SetDefaults(bool commit);
     void SetStorageProvider(ELRS_EEPROM *eeprom);
     void SetPwmChannel(uint8_t ch, uint16_t failsafe, uint8_t inputCh, bool inverted, uint8_t mode, uint8_t stretched);

@@ -27,9 +27,12 @@ typedef enum {
     HARDWARE_radio_rfo_hf,
     HARDWARE_radio_rfsw_ctrl,
     HARDWARE_radio_rfsw_ctrl_count,
+    HARDWARE_radio_tcxo,
+    HARDWARE_radio_tcxo_delay,
 
     // Radio Antenna
     HARDWARE_ant_ctrl,
+    HARDWARE_ant_group,
 
     // Radio power
     HARDWARE_power_enable,
