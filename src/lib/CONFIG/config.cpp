@@ -298,6 +298,7 @@ void TxConfig::Load()
 #else  // ESP8266
 void TxConfig::Load()
 {
+    m_eeprom.Begin();
     m_modified = 0;
     m_eeprom.Get(0, m_config);
 

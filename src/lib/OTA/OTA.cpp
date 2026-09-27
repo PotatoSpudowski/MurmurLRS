@@ -94,13 +94,6 @@ void MurmurSyncNonce()
     murmur_prev_nonce = OtaNonce;
 }
 
-void ICACHE_RAM_ATTR MurmurTrackNonce()
-{
-    if (!murmur_key_ready)
-        return;
-    (void)MurmurGetCounter();
-}
-
 static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktPtr)
 {
     uint8_t raw_header = ((uint8_t*)otaPktPtr)[0];

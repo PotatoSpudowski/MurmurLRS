@@ -1214,7 +1214,12 @@ static void setupSerial()
   }
   else if (GPIO_PIN_DEBUG_RX != UNDEF_PIN && GPIO_PIN_DEBUG_TX != UNDEF_PIN)
   {
+#if defined(PLATFORM_ESP32_S3) || defined(PLATFORM_ESP32_C3)
     serialPort = new HardwareSerial(1);
+#else
+    // Classic ESP32 uses UART1 for the separate USB serial port below.
+    serialPort = new HardwareSerial(2);
+#endif
     ((HardwareSerial *)serialPort)->begin(BACKPACK_LOGGING_BAUD, SERIAL_8N1, GPIO_PIN_DEBUG_RX, GPIO_PIN_DEBUG_TX);
   }
   else
