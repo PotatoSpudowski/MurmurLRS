@@ -25,7 +25,7 @@ jobs:
       - run: python -m pip install platformio==6.1.19
       - name: Test build-time key provisioning
         run: python -m unittest discover -s src/python/tests -p 'test_murmur_key.py'
-      - name: Test production OTA hooks and experimental session core
+      - name: Test production OTA hooks and session recovery
         working-directory: src
         env:
           MURMUR_BINDING_PHRASE: ci-only-not-a-secret
@@ -41,6 +41,14 @@ jobs:
             lib/MurmurSession/vendor/Crypto.cpp .pio/libdeps/native_murmur/Unity/src/unity.c \
             -o /tmp/murmur-session-tests
           /tmp/murmur-session-tests
+          g++ -std=c++11 -O1 -g -DMURMUR_ENCRYPT -DMURMUR_SESSION_STANDALONE -DTARGET_NATIVE \
+            -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
+            -Iinclude -Ilib/MurmurLink -Ilib/MurmurSession -I.pio/libdeps/native_murmur/Unity/src \
+            test/test_murmur_link/test_link.cpp lib/MurmurLink/MurmurLink.cpp \
+            lib/MurmurSession/MurmurSession.cpp lib/MurmurSession/vendor/SHA256.cpp \
+            lib/MurmurSession/vendor/Hash.cpp lib/MurmurSession/vendor/Crypto.cpp \
+            .pio/libdeps/native_murmur/Unity/src/unity.c -o /tmp/murmur-link-tests
+          /tmp/murmur-link-tests
 
   encrypted-firmware:
     runs-on: ubuntu-latest
@@ -52,6 +60,7 @@ jobs:
           - Unified_ESP32_LR2021_TX_via_WIFI
           - Unified_ESP32_LR1121_RX_via_WIFI
           - Unified_ESP8285_2400_TX_via_WIFI
+          - Unified_ESP32C3_2400_RX_via_WIFI
           - Murmur_LilyGO_T3S3_LR1121_TX_via_UART
           - Murmur_LilyGO_T3S3_LR1121_RX_via_UART
     steps:

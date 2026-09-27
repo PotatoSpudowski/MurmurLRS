@@ -13,7 +13,7 @@ Encrypted [ExpressLRS](https://github.com/ExpressLRS/ExpressLRS) with keyed freq
 
 ---
 
-MurmurLRS is an open-source radio-link security project that adds Ascon-128 packet encryption, truncated authentication tags, and keyed frequency hopping to ExpressLRS. Packet sizes stay unchanged; cleartext SYNC packets are still used for connection establishment. Protocol guarantees and current limitations are documented below.
+MurmurLRS is an open-source radio-link security project that adds Ascon-128 packet encryption, truncated authentication tags, and keyed frequency hopping to ExpressLRS. Packet sizes stay unchanged; cleartext SYNC packets are still used for radio synchronization. Protocol guarantees and current limitations are documented below.
 
 ## Upstream compatibility
 
@@ -25,9 +25,9 @@ Use the same MurmurLRS revision, binding phrase, and compatible RF settings on b
 
 ### Implemented
 
-- **Packet encryption and authentication.** Non-SYNC packets pass through Ascon-128. A 14-bit tag for standard packets or 16-bit tag for full-resolution packets replaces the CRC. These short tags provide limited forgery resistance, not full-strength authentication.
+- **Packet encryption and authentication.** RC/data packets pass through Ascon-128; handshake messages use HMAC-SHA-256. A 14-bit tag for standard packets or 16-bit tag for full-resolution packets replaces the CRC. These short tags provide limited forgery resistance, not full-strength authentication.
 - **Cryptographic FHSS (FHSSv2).** ASCON-XOF generates a keyed hop sequence, with rejection sampling and Fisher–Yates shuffling. Its secrecy depends on the encryption key's secrecy.
-- **Replay window.** A 64-packet sliding window checks reconstructed counters during a locked connection. It is not a persistent replay barrier across restarts.
+- **Replay window.** A 64-packet sliding window checks reconstructed counters and survives connection/rate resets within a session. New sessions install fresh directional keys after an authenticated challenge exchange.
 - **Epoch acquisition.** The RX searches candidate epochs and requires consecutive authentication matches before locking. Acquisition and reboot recovery remain important hardware test cases.
 
 ### Roadmap
@@ -42,7 +42,7 @@ Use the same MurmurLRS revision, binding phrase, and compatible RF settings on b
 
 - **Swarm ID** ([#12](https://github.com/PotatoSpudowski/MurmurLRS/issues/12)). Multiple RX addresses on one TX. One operator, multiple craft, no channel conflicts.
 
-- **Forward secrecy** ([#14](https://github.com/PotatoSpudowski/MurmurLRS/issues/14)). Session-key design under discussion. Deriving keys from a static master key and public counters alone does not provide forward secrecy.
+- **Forward secrecy** ([#14](https://github.com/PotatoSpudowski/MurmurLRS/issues/14)). Ephemeral key agreement is under discussion. The current PSK-based session protocol does not provide forward secrecy.
 
 ---
 
@@ -65,28 +65,28 @@ MurmurLRS: encryption enabled
 
 For command-line builds, set `MURMUR_BINDING_PHRASE` in the environment, then run PlatformIO from `src/`. Use `PLATFORMIO_BUILD_FLAGS` for regulatory settings, not the phrase. The generated key header stays in the ignored build directory; compiler flags and build logs do not contain the phrase or key.
 
-**Migration:** rebuild and flash both endpoints. The full-phrase key format is incompatible with older UID-derived firmware, even for the same phrase. Changing the phrase in the device's WiFi UI changes ELRS binding settings but does not replace the compiled encryption key; rebuild both endpoints to change that key. Firmware images and build directories contain the key and must be treated as secret.
+**Migration:** rebuild and flash both endpoints. Session-enabled firmware requires the new handshake on both TX and RX; it cannot exchange application packets with earlier MurmurLRS images. The full-phrase key format is incompatible with older UID-derived firmware, even for the same phrase. Changing the phrase in the device's WiFi UI changes ELRS binding settings but does not replace the compiled encryption key; rebuild both endpoints to change that key. Firmware images and build directories contain the key and must be treated as secret.
 
 ## How it works
 
-The build derives a 16-byte key from the complete UTF-8 binding phrase using SHA-256 with a versioned MurmurLRS domain prefix. The six-byte ELRS UID is an identifier, not key material. This removes the UID-sized key-space limit; actual key strength still depends on the phrase. Derivation runs on the build computer and adds no per-packet hashing cost. The standalone ASCON-XOF phrase KDF in the C library is not the firmware provisioning path.
+The build derives a 16-byte master key from the complete UTF-8 binding phrase using SHA-256 with a versioned MurmurLRS domain prefix. The six-byte ELRS UID is an identifier, not key material. This removes the UID-sized key-space limit; actual key strength still depends on the phrase. Phrase derivation runs on the build computer. The handshake derives directional traffic keys on-device; neither operation adds per-packet hashing cost. The standalone ASCON-XOF phrase KDF in the C library is not the firmware provisioning path.
 
 ```
 TX:  RC data -> encrypt + authenticate -> transmit
 RX:  receive -> verify -> decrypt -> output
 ```
 
-Zero extra bytes. Same packet structure. Same air rate. The authentication tag replaces the CRC field.
+RC/data packet sizes and air rates stay unchanged; the authentication tag replaces the data CRC field. Session establishment uses separate control packets.
 
 ## Security limits
 
 - Authentication tags are only 14 or 16 bits. An idealized single independent tag guess succeeds with probability 1/16,384 or 1/65,536; trying several counter candidates increases the number of verification opportunities.
 - Phrase derivation is a fast hash, not password stretching. The ELRS UID also permits checking phrase guesses, so use a high-entropy, unique phrase. Disclosure of the UID alone no longer directly determines the key.
-- TX rate changes reserve a fresh epoch, but counters still reset on boot and eventually wrap at 32 bits. Unique nonces across sessions need a protocol-level fix. Replay history is also reset during connection/rate reinitialization; it is not durable replay protection across sessions.
+- Session freshness depends on boot entropy. The firmware negotiates directional traffic keys before accepting application packets, preserves replay history through rate/connection changes, and suspends traffic for rekey before counter exhaustion. On-device entropy and restart behavior require hardware validation.
 - SYNC packets remain cleartext and use the stock CRC; they are not authenticated by the packet AEAD.
 - No forward secrecy is implemented. The project does not claim resistance to physical key extraction, jamming, or all packet injection attacks.
 
-The [authenticated session core](src/lib/MurmurSession/README.md) implements two-way challenge exchange, separate directional keys, and retry-safe confirmation, with 16 protocol and framing tests plus sanitizer coverage. Firmware integration is the next milestone: connecting the core to the radio transport and hardware RNG. Until that integration is complete, the boot/session limitations above apply to the firmware.
+The [authenticated session protocol](src/lib/MurmurSession/README.md) is integrated into TX/RX through bounded radio mailboxes. It provides two-way challenge exchange, separate directional keys, retry-safe confirmation, and recovery after loss of authenticated downlink. Encrypted mode requires return traffic: telemetry Off/Disarmed-Off uses 1:16, very sparse ratios are capped, and RX Force Telemetry Off is ignored. Handshake and recovery temporarily suspend application traffic.
 
 These constraints need to be considered together; cipher test vectors alone do not establish the security of the radio protocol. See [the PrivacyLRS discussion](https://github.com/PotatoSpudowski/MurmurLRS/issues/16) and [session-key proposal](https://github.com/PotatoSpudowski/MurmurLRS/issues/14).
 
@@ -105,9 +105,9 @@ make test
 
 The C suite contains 62 tests covering cipher vectors, packet authentication, replay checks, FHSSv2, acquisition, and simulated long-running sessions. The stock native PlatformIO suite contains 147 tests.
 
-`MURMUR_BINDING_PHRASE=ci-only-not-a-secret ../venv/bin/pio test -e native_murmur` (from `src/`) exercises the production encrypted OTA hooks for both packet sizes, replay-resistant acquisition/relock, packet loss, tampering, nonce wrap, rate transitions, and late joins beyond epoch 255. Python provisioning tests run with `python -m unittest discover -s src/python/tests -p test_murmur_key.py` from the repo root.
+`MURMUR_BINDING_PHRASE=ci-only-not-a-secret ../venv/bin/pio test -e native_murmur` (from `src/`) exercises the production encrypted OTA hooks for both packet sizes, replay-resistant acquisition/relock, packet loss, tampering, nonce wrap, rate transitions, and late joins beyond epoch 255. It also tests session negotiation through the OTA hooks, independent reboots, entropy failure, counter exhaustion, and bounded recovery mailboxes. Python provisioning tests run with `python -m unittest discover -s src/python/tests -p test_murmur_key.py` from the repo root.
 
-The [encrypted CI workflow](.github/workflows/murmur.yml) compiles six firmware targets with `MURMUR_ENCRYPT`, including both LilyGO bench roles; the upstream workflow exercises native tests and stock builds. Simulation does not replace over-the-air testing.
+The [encrypted CI workflow](.github/workflows/murmur.yml) compiles seven firmware targets with `MURMUR_ENCRYPT`, including both LilyGO bench roles; the upstream workflow exercises native tests and stock builds. Simulation does not replace over-the-air testing.
 
 <details>
 <summary>Technical details</summary>
@@ -117,8 +117,9 @@ The [encrypted CI workflow](.github/workflows/murmur.yml) compiles six firmware 
 **Key derivation:**
 ```
 ELRS binding-phrase define -> MD5 -> UID (first 6 bytes)
-"MurmurLRS/packet-key/v1" || NUL || UTF-8 phrase -> SHA-256 -> enc_key (first 16B)
-enc_key -> ASCON-XOF("MurmurFHSS" || enc_key) -> fhss_key (16B)
+"MurmurLRS/packet-key/v1" || NUL || UTF-8 phrase -> SHA-256 -> master_key (first 16B)
+master_key -> ASCON-XOF("MurmurFHSS" || master_key) -> fhss_key (16B)
+master_key + authenticated TX/RX challenges -> HKDF-SHA256 -> uplink_key, downlink_key
 fhss_key -> ASCON-XOF("FHSSv1" || fhss_key || domain_id) -> hop sequence
 ```
 

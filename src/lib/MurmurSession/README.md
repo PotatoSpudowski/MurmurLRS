@@ -1,10 +1,9 @@
 # Authenticated session core
 
-This module implements and tests a session handshake and bounded message framing.
-**It is not connected to the firmware's OTA callbacks or hardware RNG.** Current
-firmware still uses the compiled packet key and retains the boot/session limits
-in the repository README. Do not treat this module's tests as a radio security
-qualification or as evidence that boot-time nonce reuse is fixed in firmware.
+This module implements the authenticated handshake and message framing used by
+[MurmurLink](../MurmurLink/) and the firmware's OTA callbacks. TX/RX install
+separate traffic keys only after confirming fresh challenges. Hardware entropy
+is collected at boot; handshake cryptography runs in the main loop.
 
 ## Threat model and prerequisites
 
@@ -57,8 +56,7 @@ RX and TX activation is not simultaneous: after CONFIRM, RX can have new keys
 while TX is waiting for READY. The adapter must handle that transition explicitly;
 this module does not promise uninterrupted traffic during rekeying. A new TX
 exchange must be initiated after a peer restart or an expired pending attempt.
-Peer-restart detection and retry timeouts belong to the adapter and are not yet
-implemented here.
+The adapter implements peer-restart detection and retry timeouts as described below.
 
 ## Key derivation
 
@@ -98,33 +96,65 @@ bytes and a bidirectional frame object to less than 128 bytes. Cryptography runs
 when processing complete handshake messages, not on each data packet. These are
 structural bounds, not measurements of device execution time.
 
-## Integration requirements
+## Firmware integration
 
-- Run cryptography and entropy collection in the main loop. ISR adapters should
-  only transfer bounded buffers. Use an explicit ownership/critical-section
-  policy when exchanging buffers and activating keys.
-- Provide fresh 128-bit CSPRNG output for every new local challenge, across boots
-  as well as retries. Return failure when entropy is unavailable. Zero and
-  consecutively repeated values are rejected as obvious failures; these checks
-  do not establish RNG quality or prevent all historical repeats.
-- Initialize entropy before RF/ADC use where the SDK requires it. The ESP32 RNG
-  has prerequisites when WiFi/Bluetooth are disabled; merely calling
-  `esp_random()` is not sufficient evidence of fresh entropy. ESP8266 must also
-  have a separately verified entropy source. Never substitute UID, millis(),
-  unconditioned RSSI, or the deterministic test RNG.
-- Reserve an OTA control discriminator, apply outer CRC for corruption detection,
-  and authenticate the complete message before activating anything. No plaintext
-  or master-key data fallback is allowed while session establishment is pending.
-- Specify telemetry scheduling, telemetry-off behavior, timeouts, peer restart
-  discovery, rate changes, and application failsafe behavior. The handshake
-  needs traffic in both directions, even for an otherwise uplink-only link.
-- Keep keyed FHSS boot discovery independent of transient traffic keys.
-- Give each direction monotonic packet counters and separate replay state. Never
-  reset a counter under a retained key. Rekey before counter exhaustion and stop
-  application traffic if rekeying fails. Unauthenticated SYNC must not rewind a
-  transmit counter or erase an established replay window.
-- Test the completed radio adapter with the actual OTA implementation and on
-  hardware before enabling it by default. This core is not that adapter.
+- OTA type `0b11` carries session fragments with the stock outer CRC. The CRC
+  detects corruption; only the complete HMAC-authenticated message can install
+  keys. An index of 15 denotes idle padding. These packets never enter RC/data
+  dispatch. Standard and full-resolution packet sizes are unchanged.
+- Each retransmission rotates its starting fragment to avoid repeatedly losing
+  the same fragment under periodic loss.
+- An eight-frame mailbox bounds ISR input. The ISR copies one outgoing fragment;
+  the main loop consumes at most one incoming fragment per iteration. Handshake
+  HMAC/HKDF runs outside the shared critical section. Key publication, counters,
+  and mailboxes use an ESP32 critical section or a saved ESP8266 interrupt state.
+- TX starts at boot and restarts negotiation after five seconds without accepted
+  encrypted downlink, or after ten seconds without completing an attempt.
+  Starting a new TX exchange suspends application traffic. No plaintext or
+  persistent-master-key data fallback exists.
+- RX repeats READY until authenticated uplink proves the TX received it. Repeated
+  confirmations never reinstall keys. HELLO replies are limited to one in 16
+  downlink opportunities while the RX has recent authenticated traffic.
+- Negotiation uses telemetry 1:2. Encrypted mode requires a return channel:
+  telemetry Off/Disarmed-Off becomes 1:16, as do configured ratios with more than
+  500 ms between opportunities. RX Force Telemetry Off is ignored in encrypted
+  mode. Other telemetry behavior is unchanged for stock builds.
+- Discovery FHSS continues to use the provisioned master key, independently of
+  transient traffic keys. Each traffic direction has its own key; outgoing
+  counters and incoming replay state are separate. Rate/disconnect/SYNC handling
+  retains replay history. Outgoing counters never rewind, including multiple
+  packets in a Gemini slot. Traffic stops and requests rekey before exhaustion.
+- RX marks a control connection established only after authenticated data, and
+  CRC-only SYNC/session fragments do not refresh its control-link timeout.
+  Installing a new session clears channel assembly to avoid mixing old channels.
+- Counter acquisition requires three distinct authenticated packets in the same
+  or successive epochs, accommodating sparse telemetry. Each search revisits the
+  last known neighborhood alongside a bounded forward scan, so a damaged first
+  packet cannot strand a new peer far from epoch zero.
+
+## Boot entropy
+
+ESP32/S3/C3 enable the SDK's internal entropy source with
+`bootloader_random_enable()`, collect a 32-byte seed, then disable that source
+before device/ADC/WiFi initialization. ESP8266 temporarily wakes the WiFi RF
+subsystem in station mode without joining a network, samples `ESP.random()`, and
+turns WiFi off. This operation occurs at the start of `setup()`.
+
+Subsequent challenges are the first 16 bytes of
+`HMAC-SHA256(seed, "MurmurLRS/challenge/v1" || LE64(counter))`, with the counter
+starting at one and failing closed on exhaustion. Seed material stays in RAM.
+Zero/repeating-word seeds and failed initialization block challenge generation;
+these checks are not entropy certification. No UID, timestamp, RSSI, or test RNG
+is used as firmware entropy. Freshness across boots depends on the SDK entropy
+source operating correctly on the target hardware.
+
+## On-device validation
+
+Native tests exercise the production OTA wrappers and recovery adapter; firmware
+builds check compilation and size. On-device entropy behavior, RF timing, packet
+loss, independent power cycles, and failsafe recovery still require measurements
+on the intended hardware. The short data tags, unauthenticated SYNC, denial of
+service exposure, and lack of forward secrecy remain protocol limitations.
 
 ## Tests
 
@@ -139,8 +169,10 @@ wrong PSKs, reflection, mutation of every byte of every message, entropy failure
 key agreement and direction separation, preserved active keys during negotiation,
 loss of READY, duplicate activation prevention, fragment loss, reordering,
 conflicting duplicates, and transfer-ID wrap. CI additionally runs AddressSanitizer
-and UndefinedBehaviorSanitizer on this same code.
+and UndefinedBehaviorSanitizer on the core and recovery adapter. The separate
+`test_murmur_ota` suite drives the production CRC/AEAD and session mailbox hooks.
 
 References: [RFC 4231](https://www.rfc-editor.org/rfc/rfc4231),
 [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869),
-[Espressif RNG prerequisites](https://docs.espressif.com/projects/esp-idf/en/v4.4.5/esp32/api-reference/system/random.html).
+[Espressif RNG prerequisites](https://docs.espressif.com/projects/esp-idf/en/v4.4.5/esp32/api-reference/system/random.html),
+[ESP8266 RNG implementation](https://github.com/esp8266/Arduino/blob/3.1.2/cores/esp8266/Esp.cpp).

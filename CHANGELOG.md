@@ -4,12 +4,14 @@ All notable changes to MurmurLRS are documented here.
 
 ## Unreleased
 
-- Added an experimental HMAC-SHA-256/HKDF session core with two-sided freshness, confirmation, direction-separated keys, bounded six-byte fragmentation, protocol vectors, and sanitizer tests. It is not yet integrated into the live radio path.
+- Integrated the HMAC-SHA-256/HKDF session protocol into TX/RX, with boot-seeded challenges, directional traffic keys, bounded ISR mailboxes, and retry/reboot recovery. Application traffic waits for confirmation; hardware validation remains separate from host tests and build checks.
+- Preserve replay history across rate/connection changes, separate outgoing counters from receive synchronization, and stop traffic before counter exhaustion.
+- Require bidirectional telemetry in encrypted mode and add recovery-adapter and production OTA integration tests.
 
 - Derive firmware encryption keys from the complete build-time phrase rather than the six-byte ELRS UID. Both endpoints must be rebuilt; older encrypted firmware is incompatible.
 - Require a nonempty phrase for encrypted builds and keep generated key material out of compiler flags and build logs.
 - Track TX counter wraps on timer ticks, including periods with no transmitted packets.
-- Advance the TX epoch on rate/binding resets to avoid reusing counters within a running session. Boot-time nonce reuse remains unresolved.
+- Advance the TX epoch on rate/binding resets to avoid reusing counters within a running session. Session keys now change on authenticated boot/recovery handshakes, subject to fresh hardware entropy.
 - Reject repeated acquisition evidence and retain replay protection for acquisition packets through lock and relock.
 - Continue bounded acquisition searches beyond epoch 255 so late joins can find long-running transmitters.
 - Add CI tests against the production encrypted OTA hooks and build-time key provisioning.

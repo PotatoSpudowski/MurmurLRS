@@ -16,8 +16,16 @@ extern "C" {
 #include "ascon.h"
 }
 #include "murmur_key_generated.h"
+#include "MurmurLink.h"
+#include "MurmurLock.h"
+#include <new>
 
-static uint8_t murmur_key[16];
+static uint8_t murmur_send_key[16], murmur_receive_key[16];
+static uint32_t murmur_send_epoch, murmur_last_sent;
+static uint8_t murmur_send_prev;
+static bool murmur_have_sent;
+alignas(MurmurLink) static uint8_t murmur_link_storage[sizeof(MurmurLink)];
+static MurmurLink *murmur_link;
 static uint32_t murmur_nonce_epoch;
 static uint8_t  murmur_prev_nonce;
 static bool     murmur_is_tx = false;
@@ -35,6 +43,10 @@ static uint8_t  murmur_lock_fail_count = 0;
 #define MURMUR_LOCK_FAIL_MAX 16
 #define MURMUR_MAX_EPOCH 0xFFFFFFU
 
+#if defined(UNIT_TEST)
+void MurmurTestSetSendEpoch(uint32_t epoch) { murmur_send_epoch = epoch; }
+#endif
+
 static ValidatePacketCrc_t OriginalValidateCrc;
 static GeneratePacketCrc_t OriginalGenerateCrc;
 
@@ -47,68 +59,151 @@ static uint32_t ICACHE_RAM_ATTR MurmurGetCounter()
     return (murmur_nonce_epoch << 8) | (uint32_t)OtaNonce;
 }
 
-void MurmurInit(bool is_tx)
+static void MurmurInvalidateSession()
 {
-    memcpy(murmur_key, murmur_build_key, sizeof(murmur_key));
+    MurmurLock lock;
+    murmur_key_ready = false;
+    memset(murmur_send_key, 0, 16);
+    memset(murmur_receive_key, 0, 16);
+}
 
+void MurmurInstallSessionKeys(const uint8_t up[16], const uint8_t down[16])
+{
+    MurmurLock lock;
+    memcpy(murmur_send_key, murmur_is_tx ? up : down, 16);
+    memcpy(murmur_receive_key, murmur_is_tx ? down : up, 16);
+    murmur_send_epoch = 0;
+    murmur_send_prev = OtaNonce;
+    murmur_have_sent = false;
     murmur_nonce_epoch = 0;
-    murmur_prev_nonce = 0;
-    murmur_is_tx = is_tx;
-    murmur_epoch_locked = is_tx;
+    murmur_prev_nonce = OtaNonce;
+    // Both directions acquire independently: peers install at different slots.
+    murmur_epoch_locked = false;
     murmur_acquire_count = 0;
     murmur_acquire_epoch = 0;
     murmur_acquire_scan_pos = 0;
     murmur_lock_fail_count = 0;
     murmur_replay_init(&murmur_replay_state);
+    murmur_replay_init(&murmur_acquire_replay);
+#if defined(TARGET_RX)
+    extern void ChannelDataReset();
+    ChannelDataReset();
+    OtaResetChannelDataComplete();
+#endif
     murmur_key_ready = true;
+}
+
+void MurmurInit(bool is_tx, MurmurSession::Random random, void *context)
+{
+    // Called before radio callbacks can run. Reinitialization in native tests
+    // models reboot; firmware never resets a live link from cleartext SYNC.
+    if (murmur_link) murmur_link->~MurmurLink();
+    murmur_is_tx = is_tx;
+    MurmurInvalidateSession();
+    murmur_link = new (murmur_link_storage) MurmurLink(is_tx, murmur_build_key,
+        random, context, MurmurInstallSessionKeys, MurmurInvalidateSession);
 }
 
 void MurmurGetEncKey(uint8_t out[16])
 {
-    memcpy(out, murmur_key, 16);
+    // Discovery FHSS remains stable while traffic keys change per session.
+    memcpy(out, murmur_build_key, 16);
+}
+
+void MurmurPoll(uint32_t now)
+{
+    if (murmur_link) murmur_link->poll(now);
+}
+
+bool ICACHE_RAM_ATTR MurmurSessionReady()
+{
+    return murmur_link && murmur_link->ready();
+}
+
+bool ICACHE_RAM_ATTR MurmurHasAuthenticatedData()
+{
+    return murmur_link && murmur_link->hasAuthenticatedData();
+}
+
+bool ICACHE_RAM_ATTR MurmurPrepareSessionPacket(OTA_Packet_s *packet)
+{
+    MurmurLock lock;
+    uint8_t frame[6];
+    bool have = murmur_link && murmur_link->takeFrame(frame);
+    if (!have && murmur_key_ready) return false;
+    memset(packet, 0, sizeof(*packet));
+    packet->std.type = PACKET_TYPE_SESSION;
+    // Invalid fragment index is an idle envelope, never an RC/data packet.
+    if (!have) { memset(frame, 0, 6); frame[0] = 15; }
+    memcpy(reinterpret_cast<uint8_t *>(packet) + 1, frame, 6);
+    return true;
 }
 
 void MurmurResetCounter()
 {
+    MurmurLock lock;
+    if (!murmur_key_ready) return;
+    // Rate/disconnect events do not clear accepted history or reinstall keys.
+    ++murmur_send_epoch;
+    murmur_send_prev = OtaNonce;
     murmur_prev_nonce = OtaNonce;
-    if (murmur_is_tx) {
-        // SetRFLinkRate resets OtaNonce to zero. Reserve a fresh epoch so a
-        // rate/binding transition cannot reuse counters from the previous one.
-        // Boot/session uniqueness still requires a separate protocol change.
-        murmur_nonce_epoch++;
-    } else {
-        murmur_epoch_locked = false;
-        murmur_acquire_count = 0;
-        murmur_nonce_epoch = 0;
-        murmur_acquire_scan_pos = 0;
-        murmur_lock_fail_count = 0;
-    }
-    murmur_replay_init(&murmur_replay_state);
+    murmur_epoch_locked = false;
+    murmur_acquire_count = 0;
+    murmur_acquire_scan_pos = murmur_nonce_epoch > 4 ? murmur_nonce_epoch - 4 : 0;
 }
 
 void ICACHE_RAM_ATTR MurmurTrackNonce()
 {
-    if (!murmur_key_ready)
-        return;
+    MurmurLock lock;
+    if (!murmur_key_ready) return;
+    if (OtaNonce < murmur_send_prev) ++murmur_send_epoch;
+    murmur_send_prev = OtaNonce;
     (void)MurmurGetCounter();
+    if (murmur_send_epoch >= 0xFFFF00U) {
+        murmur_key_ready = false;
+        if (murmur_link) murmur_link->requestRestart();
+    }
 }
 
 void MurmurSyncNonce()
 {
+    MurmurLock lock;
+    // SYNC may adjust the slot clock, never receive history or traffic keys.
     murmur_prev_nonce = OtaNonce;
 }
 
 static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktPtr)
 {
+    MurmurLock lock;
     uint8_t raw_header = ((uint8_t*)otaPktPtr)[0];
     uint8_t ptype = raw_header & 0x03;
 
-    if (ptype == PACKET_TYPE_SYNC || !murmur_key_ready) {
+    if (ptype == PACKET_TYPE_SYNC || ptype == PACKET_TYPE_SESSION) {
         OriginalGenerateCrc(otaPktPtr);
         return;
     }
-
-    uint32_t counter = MurmurGetCounter();
+    MurmurTrackNonce();
+    if (!murmur_key_ready) {
+        MurmurPrepareSessionPacket(otaPktPtr);
+        OriginalGenerateCrc(otaPktPtr);
+        return;
+    }
+    uint32_t counter = (murmur_send_epoch << 8) | OtaNonce;
+    // Multiple packets in a Gemini slot and backwards SYNC corrections also
+    // need distinct nonces. Only this transmit high-water mark allocates them.
+    if (murmur_have_sent && counter <= murmur_last_sent) {
+        ++murmur_send_epoch;
+        if (murmur_send_epoch >= 0xFFFF00U) {
+            murmur_key_ready = false;
+            if (murmur_link) murmur_link->requestRestart();
+            MurmurPrepareSessionPacket(otaPktPtr);
+            OriginalGenerateCrc(otaPktPtr);
+            return;
+        }
+        counter = (murmur_send_epoch << 8) | OtaNonce;
+    }
+    murmur_last_sent = counter;
+    murmur_have_sent = true;
     /* TX sends uplink (dir=0), RX sends downlink (dir=1) */
     uint8_t direction = murmur_is_tx ? 0 : 1;
     uint8_t *payload = ((uint8_t*)otaPktPtr) + 1;
@@ -116,7 +211,7 @@ static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktP
     if (OtaIsFullRes) {
         /* OTA8: full byte 0 is stable — authenticate all header bits */
         uint8_t payload_len = OTA8_CRC_CALC_LEN - 1;
-        uint16_t mac = murmur_encrypt_packet(murmur_key, counter,
+        uint16_t mac = murmur_encrypt_packet(murmur_send_key, counter,
                                              raw_header, direction,
                                              payload, payload_len, 16);
         otaPktPtr->full.crc = mac;
@@ -125,7 +220,7 @@ static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktP
          * Use only the type bits as AD so TX and RX agree. */
         otaPktPtr->std.crcHigh = 0;
         uint8_t payload_len = OTA4_CRC_CALC_LEN - 1;
-        uint16_t mac = murmur_encrypt_packet(murmur_key, counter,
+        uint16_t mac = murmur_encrypt_packet(murmur_send_key, counter,
                                              ptype, direction,
                                              payload, payload_len, 14);
         otaPktPtr->std.crcHigh = (mac >> 8);
@@ -135,12 +230,17 @@ static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktP
 
 static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktPtr)
 {
+    MurmurLock lock;
     uint8_t raw_header = ((uint8_t*)otaPktPtr)[0];
     uint8_t ptype = raw_header & 0x03;
 
-    if (ptype == PACKET_TYPE_SYNC || !murmur_key_ready) {
-        return OriginalValidateCrc(otaPktPtr);
+    if (ptype == PACKET_TYPE_SYNC) return !murmur_is_tx && OriginalValidateCrc(otaPktPtr);
+    if (ptype == PACKET_TYPE_SESSION) {
+        if (!OriginalValidateCrc(otaPktPtr)) return false;
+        if (murmur_link) murmur_link->receive(reinterpret_cast<uint8_t *>(otaPktPtr) + 1);
+        return true; // Caller must dispatch by type; never counts as data auth.
     }
+    if (!murmur_key_ready) return false;
 
     uint8_t *payload = ((uint8_t*)otaPktPtr) + 1;
     uint16_t received_mac;
@@ -170,11 +270,12 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
 
         /* Fast path: try expected epoch with primary nonce */
         uint32_t candidate = (expected_epoch << 8) | (uint32_t)nonce;
-        if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
+        if (murmur_decrypt_packet(murmur_receive_key, candidate, ad_header, direction,
                                   payload, payload_len, received_mac, mac_bits)) {
             if (!murmur_replay_check(&murmur_replay_state, candidate))
                 return false;
             murmur_lock_fail_count = 0;
+            if (murmur_link) murmur_link->authenticated();
             return true;
         }
 
@@ -185,13 +286,14 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
             for (int e = 0; e < 2; e++) {
                 if (epochs[e] == 0xFFFFFFFF) continue;
                 candidate = (epochs[e] << 8) | (uint32_t)nonce;
-                if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
+                if (murmur_decrypt_packet(murmur_receive_key, candidate, ad_header, direction,
                                           payload, payload_len, received_mac, mac_bits)) {
                     if (!murmur_replay_check(&murmur_replay_state, candidate))
                         return false;
                     murmur_nonce_epoch = epochs[e];
                     murmur_prev_nonce = nonce;
                     murmur_lock_fail_count = 0;
+                    if (murmur_link) murmur_link->authenticated();
                     return true;
                 }
             }
@@ -202,13 +304,14 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
         uint32_t nonce_m1_epoch = (nonce == 0 && expected_epoch > 0)
                                   ? expected_epoch - 1 : expected_epoch;
         candidate = (nonce_m1_epoch << 8) | (uint32_t)nonce_m1;
-        if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
+        if (murmur_decrypt_packet(murmur_receive_key, candidate, ad_header, direction,
                                   payload, payload_len, received_mac, mac_bits)) {
             if (!murmur_replay_check(&murmur_replay_state, candidate))
                 return false;
             murmur_nonce_epoch = nonce_m1_epoch;
             murmur_prev_nonce = nonce_m1;
             murmur_lock_fail_count = 0;
+            if (murmur_link) murmur_link->authenticated();
             return true;
         }
 
@@ -225,21 +328,24 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
      * Try nonce and nonce-1 (timer may not have converged yet after SYNC).
      * Search MURMUR_ACQUIRE_EPOCHS_PER_PACKET epochs per call to bound ISR time,
      * scanning forward from last known position (32-bit, no wrap masking).
-     * Require MURMUR_ACQUIRE_THRESHOLD consecutive matches at the same
+     * Require MURMUR_ACQUIRE_THRESHOLD consecutive matches at the same or next
      * epoch before locking in, to avoid false accepts with truncated MACs. */
     uint8_t nonces[2] = { nonce, (uint8_t)(nonce - 1) };
     uint8_t nonce_count = 2;
     uint32_t scan_start = murmur_acquire_scan_pos;
 
     for (uint8_t i = 0; i < MURMUR_ACQUIRE_EPOCHS_PER_PACKET; i++) {
-        uint32_t epoch = scan_start + i;
-        if (epoch > MURMUR_MAX_EPOCH) break;
+        // Always revisit the last known neighborhood. A single corrupt packet
+        // must not move acquisition millions of epochs away from a fresh peer.
+        const uint32_t anchor = murmur_acquire_count ? murmur_acquire_epoch : murmur_nonce_epoch;
+        uint32_t epoch = i < 8 ? (anchor > 4 ? anchor - 4 : 0) + i : scan_start + i - 8;
+        if (epoch > MURMUR_MAX_EPOCH) continue;
         for (uint8_t n = 0; n < nonce_count; n++) {
             uint32_t candidate = (epoch << 8) | (uint32_t)nonces[n];
-            if (murmur_decrypt_packet(murmur_key, candidate, ad_header, direction,
+            if (murmur_decrypt_packet(murmur_receive_key, candidate, ad_header, direction,
                                       payload, payload_len, received_mac, mac_bits)) {
-                if (!murmur_acquire_count || epoch != murmur_acquire_epoch) {
-                    murmur_acquire_epoch = epoch;
+                if (!murmur_acquire_count ||
+                    (epoch != murmur_acquire_epoch && epoch != murmur_acquire_epoch + 1)) {
                     murmur_acquire_count = 0;
                     // Keep previously accepted counters protected on relock.
                     // Trial matches must not poison the committed window.
@@ -247,6 +353,7 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
                 }
                 if (!murmur_replay_check(&murmur_acquire_replay, candidate))
                     return false;
+                murmur_acquire_epoch = epoch;
                 murmur_acquire_count++;
 
                 if (murmur_acquire_count >= MURMUR_ACQUIRE_THRESHOLD) {
@@ -254,6 +361,7 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
                     murmur_prev_nonce = nonces[n];
                     murmur_epoch_locked = true;
                     murmur_replay_state = murmur_acquire_replay;
+                    if (murmur_link) murmur_link->authenticated();
                     return true;
                 }
                 murmur_acquire_scan_pos = epoch;
@@ -263,7 +371,7 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
     }
 
     murmur_acquire_count = 0;
-    murmur_acquire_scan_pos = scan_start + MURMUR_ACQUIRE_EPOCHS_PER_PACKET;
+    murmur_acquire_scan_pos = scan_start + MURMUR_ACQUIRE_EPOCHS_PER_PACKET / 2;
     if (murmur_acquire_scan_pos > MURMUR_MAX_EPOCH) {
         murmur_acquire_scan_pos = 0;
     }

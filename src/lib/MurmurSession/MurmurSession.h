@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Experimental protocol core. Not connected to the production radio path yet.
+// Protocol core; MurmurLink adapts it to the production radio path.
 // Call from the main loop, never an ISR. Random must provide 16 fresh CSPRNG
 // bytes per call and return false on failure. Deterministic test RNGs are not
 // suitable for firmware. A single instance must not be used concurrently.

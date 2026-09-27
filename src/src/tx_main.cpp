@@ -241,6 +241,9 @@ static bool ICACHE_RAM_ATTR ProcessDownlinkPacket(SX12xxDriverCommon::rx_status 
     return false;
   }
 
+#if defined(MURMUR_ENCRYPT)
+  if (otaPktPtr->std.type == PACKET_TYPE_SESSION) return true;
+#endif
   LastTLMpacketRecv_Ms = millis();
   LqTQly.add();
 
@@ -369,6 +372,14 @@ expresslrs_tlm_ratio_e ICACHE_RAM_ATTR UpdateTlmRatioEffective()
     retVal = ratioConfigured;
   }
 
+#if defined(MURMUR_ENCRYPT)
+  // Sessions require bidirectional confirmation and peer-reboot detection.
+  if (!MurmurSessionReady()) retVal = TLM_RATIO_1_2;
+  else if (retVal == TLM_RATIO_NO_TLM ||
+           TLMratioEnumToValue(retVal) * ExpressLRS_currAirRate_Modparams->interval > 500000)
+    retVal = TLM_RATIO_1_16;
+  updateTelemDenom = true;
+#endif
   if (updateTelemDenom)
   {
     uint8_t newTlmDenom = TLMratioEnumToValue(retVal);
@@ -570,6 +581,12 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
     GenerateSyncPacketData(OtaIsFullRes ? &otaPkt.full.sync.sync : &otaPkt.std.sync);
     syncSlot = (syncSlot + 1) % (ExpressLRS_currAirRate_Modparams->FHSShopInterval * 2);
   }
+#if defined(MURMUR_ENCRYPT)
+  else if (MurmurPrepareSessionPacket(&otaPkt))
+  {
+    // Main loop prepares messages; ISR only copies a fragment.
+  }
+#endif
   else
   {
     if (firmwareOptions.is_airport)
@@ -1402,6 +1419,9 @@ static void checkSendLinkStatsToHandset(uint32_t now)
 
 void setup()
 {
+#if defined(MURMUR_ENCRYPT)
+    MurmurEntropyInit();
+#endif
   if (setupHardwareFromOptions())
   {
     setupTarget();
@@ -1413,7 +1433,6 @@ void setup()
 
     setupBindingFromConfig();
 #if defined(MURMUR_ENCRYPT)
-    extern void MurmurInit(bool is_tx);
     extern void MurmurGetEncKey(uint8_t out[16]);
     MurmurInit(true);
     { uint8_t ek[16]; MurmurGetEncKey(ek); FHSSrandomiseFHSSsequenceSecure(ek); }
@@ -1506,6 +1525,9 @@ void setup()
 void loop()
 {
   uint32_t now = millis();
+#if defined(MURMUR_ENCRYPT)
+  MurmurPoll(now);
+#endif
 
   HandleUARTout(); // Only used for non-CRSF output
 

@@ -485,6 +485,13 @@ bool ICACHE_RAM_ATTR HandleSendDataDl()
         tlmQueued = DataDlSender.IsActive();
     }
 
+#if defined(MURMUR_ENCRYPT)
+    if (MurmurPrepareSessionPacket(&otaPkt))
+    {
+        // Session packets use one common envelope on both radios.
+    }
+    else
+#endif
     if (NextTelemetryType == PACKET_TYPE_LINKSTATS || !tlmQueued)
     {
         otaPkt.std.type = PACKET_TYPE_LINKSTATS;
@@ -537,11 +544,13 @@ bool ICACHE_RAM_ATTR HandleSendDataDl()
     }
 
     SX12XX_Radio_Number_t transmittingRadio;
+#if !defined(MURMUR_ENCRYPT)
     if (config.GetForceTlmOff())
     {
         transmittingRadio = SX12XX_Radio_NONE;
     }
     else
+#endif
     {
         transmittingRadio = LbtChannelIsClear(SX12XX_Radio_All);   // weed out the radio(s) if channel in use
         if (isDualRadio() && !geminiMode && transmittingRadio == SX12XX_Radio_All) // If the receiver is in diversity mode, only send TLM on a single radio.
@@ -1161,7 +1170,11 @@ bool ICACHE_RAM_ATTR ProcessRFPacket(SX12xxDriverCommon::rx_status const status)
     doStartTimer = false;
     unsigned long now = millis();
 
-    LastValidPacket = now;
+#if defined(MURMUR_ENCRYPT)
+    // CRC-only SYNC/fragments cannot postpone control-link failsafe.
+    if (otaPktPtr->std.type == PACKET_TYPE_RCDATA || otaPktPtr->std.type == PACKET_TYPE_DATA)
+#endif
+        LastValidPacket = now;
 
     Radio.CheckForSecondPacket();
     if (Radio.hasSecondRadioGotData)
@@ -2028,6 +2041,9 @@ void resetConfigAndReboot()
 
 void setup()
 {
+#if defined(MURMUR_ENCRYPT)
+    MurmurEntropyInit();
+#endif
     if (!options_init())
     {
         // In the failure case we set the logging to the null logger so nothing crashes
@@ -2091,7 +2107,6 @@ void setup()
 
         setupBindingFromConfig();
 #if defined(MURMUR_ENCRYPT)
-        extern void MurmurInit(bool is_tx);
         extern void MurmurGetEncKey(uint8_t out[16]);
         MurmurInit(false);
         { uint8_t ek[16]; MurmurGetEncKey(ek); FHSSrandomiseFHSSsequenceSecure(ek); }
@@ -2130,6 +2145,9 @@ void loop()
 #endif
 {
     unsigned long now = millis();
+#if defined(MURMUR_ENCRYPT)
+    MurmurPoll(now);
+#endif
 
     if (DataUlReceiver.HasFinishedData())
     {
@@ -2177,7 +2195,12 @@ void loop()
         LostConnection(true);
     }
 
-    if ((connectionState == tentative) && (abs(LPF_OffsetDx.value()) <= 10) && (LPF_Offset.value() < 100) && (LQCalc.getLQRaw() > minLqForChaos())) //detects when we are connected
+    if (
+#if defined(MURMUR_ENCRYPT)
+        MurmurHasAuthenticatedData() &&
+        (now - LastValidPacket <= ExpressLRS_currAirRate_RFperfParams->DisconnectTimeoutMs) &&
+#endif
+        (connectionState == tentative) && (abs(LPF_OffsetDx.value()) <= 10) && (LPF_Offset.value() < 100) && (LQCalc.getLQRaw() > minLqForChaos())) //detects when we are connected
     {
         GotConnection(now);
     }

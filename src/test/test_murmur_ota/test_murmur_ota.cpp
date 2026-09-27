@@ -9,10 +9,20 @@
 #include <unity.h>
 #include "OTA.h"
 #include "CRSFEndpoint.h"
+extern "C" {
+#include "murmur.h"
+}
+extern void MurmurTestSetSendEpoch(uint32_t epoch);
 
 CRSFEndpoint *crsfEndpoint = nullptr;
 uint32_t ChannelData[CRSF_NUM_CHANNELS];
-extern void MurmurInit(bool is_tx);
+extern void MurmurInstallSessionKeys(const uint8_t up[16], const uint8_t down[16]);
+static void initSession(bool tx)
+{
+    const uint8_t up[16] = {1,2,3,4}, down[16] = {5,6,7,8};
+    MurmurInit(tx);
+    MurmurInstallSessionKeys(up, down);
+}
 extern void MurmurTrackNonce();
 extern void MurmurResetCounter();
 
@@ -23,7 +33,7 @@ static void prepare(uint8_t packetSize, bool senderTx = true, uint32_t start = 1
 {
     OtaUpdateSerializers(smWideOr8ch, packetSize);
     payloadSize = (packetSize == OTA4_PACKET_SIZE ? OTA4_CRC_CALC_LEN : OTA8_CRC_CALC_LEN) - 1;
-    MurmurInit(senderTx);
+    initSession(senderTx);
     for (uint32_t counter = 0; counter < start; ++counter) {
         OtaNonce = counter;
         MurmurTrackNonce();
@@ -35,7 +45,7 @@ static void prepare(uint8_t packetSize, bool senderTx = true, uint32_t start = 1
         std::memset(reinterpret_cast<uint8_t *>(&packets[i]) + 1, 0x30 + i, payloadSize);
         OtaGeneratePacketCrc(&packets[i]);
     }
-    MurmurInit(!senderTx);
+    initSession(!senderTx);
 }
 
 static bool receive(unsigned i, uint8_t nonce)
@@ -88,7 +98,8 @@ void test_downlink_both_sizes()
 {
     for (uint8_t size : {OTA4_PACKET_SIZE, OTA8_PACKET_SIZE}) {
         prepare(size, false);
-        TEST_ASSERT_TRUE(receive(0, 10));
+        TEST_ASSERT_FALSE(receive(0, 10));
+        TEST_ASSERT_FALSE(receive(1, 11));
         TEST_ASSERT_TRUE(receive(2, 12));
         TEST_ASSERT_FALSE(receive(2, 12));
     }
@@ -102,7 +113,9 @@ void test_tampering_does_not_consume_counter()
         reinterpret_cast<uint8_t *>(&damaged)[2] ^= 0x80;
         OtaNonce = 10;
         TEST_ASSERT_FALSE(OtaValidatePacketCrc(&damaged));
-        TEST_ASSERT_TRUE(receive(0, 10));
+        TEST_ASSERT_FALSE(receive(0, 10));
+        TEST_ASSERT_FALSE(receive(1, 11));
+        TEST_ASSERT_TRUE(receive(2, 12));
     }
 }
 
@@ -155,7 +168,7 @@ void test_rate_reset_reserves_fresh_counters()
 {
     for (uint8_t size : {OTA4_PACKET_SIZE, OTA8_PACKET_SIZE}) {
         OtaUpdateSerializers(smWideOr8ch, size);
-        MurmurInit(true);
+        initSession(true);
         OTA_Packet_s first{};
         first.std.type = PACKET_TYPE_DATA;
         OtaNonce = 0;
@@ -176,7 +189,7 @@ void test_rate_reset_reserves_fresh_counters()
             packets[i].std.type = PACKET_TYPE_DATA;
             OtaGeneratePacketCrc(&packets[i]);
         }
-        MurmurInit(false);
+        initSession(false);
         for (unsigned i = 0; i < 3; ++i) {
             OtaNonce = i + 1;
             TEST_ASSERT_EQUAL(i == 2, OtaValidatePacketCrc(&packets[i]));
@@ -188,7 +201,7 @@ void test_silent_ticks_preserve_nonce_epoch()
 {
     for (uint8_t size : {OTA4_PACKET_SIZE, OTA8_PACKET_SIZE}) {
         OtaUpdateSerializers(smWideOr8ch, size);
-        MurmurInit(true);
+        initSession(true);
         OTA_Packet_s first{};
         first.std.type = PACKET_TYPE_DATA;
         OtaNonce = 0;
@@ -213,13 +226,13 @@ void test_production_packet_timing()
         const unsigned count = 4096;
         std::vector<OTA_Packet_s> frames(count);
         OtaUpdateSerializers(smWideOr8ch, size);
-        MurmurInit(true);
+        initSession(true);
         for (unsigned i = 0; i < count; ++i) {
             OtaNonce = i;
             frames[i].std.type = PACKET_TYPE_DATA;
             OtaGeneratePacketCrc(&frames[i]);
         }
-        MurmurInit(false);
+        initSession(false);
         for (unsigned i = 0; i < 3; ++i) {
             OtaNonce = i;
             bool accepted = OtaValidatePacketCrc(&frames[i]);
@@ -239,6 +252,183 @@ void test_production_packet_timing()
     }
 }
 
+
+static bool fixtureRandom(void *context, uint8_t out[16])
+{
+    uint8_t &value = *static_cast<uint8_t *>(context);
+    memset(out, ++value, 16);
+    return true;
+}
+
+void test_unconfirmed_firmware_never_sends_or_accepts_data()
+{
+    for (uint8_t size : {OTA4_PACKET_SIZE, OTA8_PACKET_SIZE}) {
+        prepare(size);
+        MurmurInit(false); // reboot, no session keys installed
+        TEST_ASSERT_FALSE(receive(2, 12));
+        OTA_Packet_s packet{};
+        packet.std.type = PACKET_TYPE_RCDATA;
+        memset(reinterpret_cast<uint8_t *>(&packet) + 1, 0xAB, 6);
+        OtaGeneratePacketCrc(&packet);
+        TEST_ASSERT_EQUAL(PACKET_TYPE_SESSION, packet.std.type);
+        TEST_ASSERT_EQUAL_UINT8(15, reinterpret_cast<uint8_t *>(&packet)[1]);
+        TEST_ASSERT_EQUAL_UINT8(0, reinterpret_cast<uint8_t *>(&packet)[2]);
+    }
+}
+
+void test_rate_and_sync_cannot_clear_replay_history()
+{
+    for (uint8_t size : {OTA4_PACKET_SIZE, OTA8_PACKET_SIZE}) {
+        prepare(size);
+        receive(0,10); receive(1,11); TEST_ASSERT_TRUE(receive(2,12));
+        MurmurResetCounter();
+        OtaNonce=10; MurmurSyncNonce();
+        for (unsigned i=0; i<10; ++i) {
+            TEST_ASSERT_FALSE(receive(0,10));
+            TEST_ASSERT_FALSE(receive(1,11));
+            TEST_ASSERT_FALSE(receive(2,12));
+        }
+        receive(3,13); receive(4,14); TEST_ASSERT_TRUE(receive(5,15));
+    }
+}
+
+void test_repeated_slot_and_backwards_sync_use_distinct_nonces()
+{
+    for (uint8_t size : {OTA4_PACKET_SIZE, OTA8_PACKET_SIZE}) {
+        OtaUpdateSerializers(smWideOr8ch,size);
+        OtaNonce=100; initSession(false);
+        OTA_Packet_s a{},b{},c{};
+        a.std.type=b.std.type=c.std.type=PACKET_TYPE_DATA;
+        OtaGeneratePacketCrc(&a); OtaGeneratePacketCrc(&b);
+        OtaNonce=99; MurmurSyncNonce(); OtaGeneratePacketCrc(&c);
+        TEST_ASSERT_NOT_EQUAL(0,memcmp(&a,&b,size));
+        TEST_ASSERT_NOT_EQUAL(0,memcmp(&a,&c,size));
+        TEST_ASSERT_NOT_EQUAL(0,memcmp(&b,&c,size));
+    }
+}
+
+void test_handshake_through_production_ota_hooks()
+{
+    for (uint8_t size : {OTA4_PACKET_SIZE, OTA8_PACKET_SIZE}) {
+        for (bool localTx : {false,true}) {
+            OtaUpdateSerializers(smWideOr8ch,size);
+            uint8_t localRandom=10, peerRandom=60, master[16], message[50];
+            MurmurInit(localTx,fixtureRandom,&localRandom);
+            MurmurGetEncKey(master);
+            MurmurSession peer(!localTx,master,fixtureRandom,&peerRandom);
+            MurmurSessionFrames frames;
+            if (!localTx) { peer.start(message); frames.queue(message); }
+            for (unsigned step=0; step<1000; ++step) {
+                OtaNonce=step;
+                MurmurTrackNonce();
+                MurmurPoll(step*2);
+                OTA_Packet_s packet{};
+                if (MurmurPrepareSessionPacket(&packet)) {
+                    OtaGeneratePacketCrc(&packet);
+                    TEST_ASSERT_EQUAL(PACKET_TYPE_SESSION,packet.std.type);
+                    if (step%7 && frames.receive(reinterpret_cast<uint8_t *>(&packet)+1,6,message)) {
+                        uint8_t reply[50];
+                        if (peer.receive(message,50,reply) & MurmurSession::Send) frames.queue(reply);
+                    }
+                }
+                uint8_t frame[6];
+                if (frames.next(frame)) {
+                    packet={}; packet.std.type=PACKET_TYPE_SESSION;
+                    memcpy(reinterpret_cast<uint8_t *>(&packet)+1,frame,6);
+                    OtaGeneratePacketCrc(&packet);
+                    if (step%13) TEST_ASSERT_TRUE(OtaValidatePacketCrc(&packet));
+                } else if (peer.retry(message)) frames.queue(message);
+                if (MurmurSessionReady() && peer.active()) break;
+                TEST_ASSERT_LESS_THAN(999,step);
+            }
+            TEST_ASSERT_TRUE(MurmurSessionReady());
+            TEST_ASSERT_TRUE(peer.active());
+            uint8_t up[16], down[16];
+            peer.getKeys(up,down);
+            OTA_Packet_s data{};
+            data.std.type=PACKET_TYPE_DATA;
+            const unsigned payload=(size==OTA4_PACKET_SIZE ? OTA4_CRC_CALC_LEN : OTA8_CRC_CALC_LEN)-1;
+            memset(reinterpret_cast<uint8_t *>(&data)+1,0x44,payload);
+            OtaGeneratePacketCrc(&data);
+            const uint16_t mac = size==OTA4_PACKET_SIZE ? (data.std.crcHigh<<8)|data.std.crcLow : data.full.crc;
+            bool decrypted=false;
+            for (uint32_t epoch=0; epoch<4 && !decrypted; ++epoch) {
+                OTA_Packet_s copy=data;
+                decrypted=murmur_decrypt_packet(localTx ? up : down,(epoch<<8)|OtaNonce,
+                    PACKET_TYPE_DATA,localTx ? 0 : 1,reinterpret_cast<uint8_t *>(&copy)+1,
+                    payload,mac,size==OTA4_PACKET_SIZE ? 14 : 16);
+                if (decrypted) {
+                    for (unsigned i=0;i<payload;++i)
+                        TEST_ASSERT_EQUAL_UINT8(0x44,reinterpret_cast<uint8_t *>(&copy)[i+1]);
+                }
+            }
+            TEST_ASSERT_TRUE_MESSAGE(decrypted,"OTA must use the negotiated directional key");
+        }
+    }
+}
+
+
+void test_counter_exhaustion_blocks_application_packets()
+{
+    for (bool tx : {false,true}) {
+        for (uint8_t size : {OTA4_PACKET_SIZE,OTA8_PACKET_SIZE}) {
+            OtaUpdateSerializers(smWideOr8ch,size);
+            OtaNonce=0; initSession(tx);
+            MurmurTestSetSendEpoch(0xFFFF00U);
+            OTA_Packet_s packet{};
+            packet.std.type=PACKET_TYPE_DATA;
+            OtaGeneratePacketCrc(&packet);
+            TEST_ASSERT_EQUAL(PACKET_TYPE_SESSION,packet.std.type);
+            for (unsigned i=0;i<3;++i) {
+                packet={}; packet.std.type=PACKET_TYPE_RCDATA;
+                OtaGeneratePacketCrc(&packet);
+                TEST_ASSERT_EQUAL(PACKET_TYPE_SESSION,packet.std.type);
+            }
+        }
+    }
+}
+
+void test_sparse_downlink_acquires_across_epochs()
+{
+    for (uint8_t size : {OTA4_PACKET_SIZE,OTA8_PACKET_SIZE}) {
+        OtaUpdateSerializers(smWideOr8ch,size);
+        OtaNonce=0; initSession(false);
+        for (unsigned slot=0;slot<=256;++slot) {
+            OtaNonce=slot; MurmurTrackNonce();
+            if (slot%128==0) {
+                packets[slot/128]={}; packets[slot/128].std.type=PACKET_TYPE_DATA;
+                OtaGeneratePacketCrc(&packets[slot/128]);
+            }
+        }
+        OtaNonce=0; initSession(true);
+        for (unsigned slot=0;slot<=256;++slot) {
+            OtaNonce=slot; MurmurTrackNonce();
+            if (slot%128==0) {
+                OTA_Packet_s packet=packets[slot/128];
+                TEST_ASSERT_EQUAL(slot==256,OtaValidatePacketCrc(&packet));
+            }
+        }
+    }
+}
+
+
+void test_cleartext_sync_is_discovery_only()
+{
+    for (uint8_t size : {OTA4_PACKET_SIZE,OTA8_PACKET_SIZE}) {
+        OtaUpdateSerializers(smWideOr8ch,size);
+        MurmurInit(true);
+        OTA_Packet_s packet{};
+        packet.std.type=PACKET_TYPE_SYNC;
+        OtaGeneratePacketCrc(&packet);
+        OTA_Packet_s copy=packet;
+        TEST_ASSERT_FALSE(OtaValidatePacketCrc(&copy)); // no downlink SYNC
+        MurmurInit(false);
+        TEST_ASSERT_TRUE(OtaValidatePacketCrc(&packet));
+        TEST_ASSERT_FALSE(MurmurSessionReady());
+        TEST_ASSERT_FALSE(MurmurHasAuthenticatedData());
+    }
+}
+
 int main()
 {
     UNITY_BEGIN();
@@ -253,5 +443,12 @@ int main()
     RUN_TEST(test_rate_reset_reserves_fresh_counters);
     RUN_TEST(test_silent_ticks_preserve_nonce_epoch);
     RUN_TEST(test_production_packet_timing);
+    RUN_TEST(test_unconfirmed_firmware_never_sends_or_accepts_data);
+    RUN_TEST(test_rate_and_sync_cannot_clear_replay_history);
+    RUN_TEST(test_repeated_slot_and_backwards_sync_use_distinct_nonces);
+    RUN_TEST(test_handshake_through_production_ota_hooks);
+    RUN_TEST(test_counter_exhaustion_blocks_application_packets);
+    RUN_TEST(test_sparse_downlink_acquires_across_epochs);
+    RUN_TEST(test_cleartext_sync_is_discovery_only);
     return UNITY_END();
 }
