@@ -12,4 +12,5 @@ venv/
 .context/
 benchmark/
 CLAUDE.md
+AGENTS.md
 docs/
