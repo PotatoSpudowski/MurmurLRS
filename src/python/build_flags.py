@@ -7,11 +7,16 @@ import fnmatch
 import time
 import re
 import elrs_helpers
+from murmur_key import write_key_header
 
 build_flags = env.get('BUILD_FLAGS', [])
+if any('MY_BINDING_PHRASE' in flag for flag in build_flags):
+    raise ValueError('Set MURMUR_BINDING_PHRASE in the environment or use user_defines.txt; '
+                     'do not put binding phrases in compiler flags')
 json_flags = {}
 UIDbytes = ""
 define = ""
+murmur_phrase = None
 target_name = env.get('PIOENV', '').upper()
 
 isRX = True if '_RX_' in target_name else False
@@ -67,8 +72,13 @@ def process_json_flag(define):
         json_flags['lock-on-first-connection'] = True
 
 def process_build_flag(define):
+    global murmur_phrase
     if define.startswith("-D") or define.startswith("!-D"):
         if "MY_BINDING_PHRASE" in define:
+            phrase_match = re.fullmatch(r'-DMY_BINDING_PHRASE="(.*)"', define)
+            if not phrase_match:
+                raise ValueError('Use -DMY_BINDING_PHRASE="your phrase"')
+            murmur_phrase = phrase_match.group(1)
             bindingPhraseHash = hashlib.md5(define.encode()).digest()
             UIDbytes = ",".join(list(map(str, bindingPhraseHash))[0:6])
             define = "-DMY_UID=" + UIDbytes
@@ -143,11 +153,21 @@ json_flags['wifi-on-interval'] = -1
 
 process_flags("user_defines.txt")
 process_flags("super_defines.txt") # allow secret super_defines to override user_defines
+# Use an environment variable for CLI/CI builds so no secret appears in compiler
+# flags. This also provisions the UID for normal Unified targets.
+if os.environ.get("MURMUR_BINDING_PHRASE") is not None:
+    phrase_define = '-DMY_BINDING_PHRASE="' + os.environ["MURMUR_BINDING_PHRASE"] + '"'
+    process_build_flag(phrase_define)
+    process_json_flag(phrase_define)
 version_to_env()
 build_flags.append("-DLATEST_COMMIT=" + get_git_sha())
 build_flags.append("-DLATEST_VERSION=" + get_version())
 build_flags.append("-DTARGET_NAME=" + re.sub("_VIA_.*", "", target_name))
 condense_flags()
+
+if any(re.search(r'(?:^|\s)-DMURMUR_ENCRYPT(?:=\S+)?(?:\s|$)', flag) for flag in build_flags):
+    write_key_header(env.subst("$BUILD_DIR"), murmur_phrase)
+    env.Append(CPPPATH=[env.subst("$BUILD_DIR")])
 
 if '-DRADIO_SX127X=1' in build_flags or '-DRADIO_LR1121=1' in build_flags or '-DRADIO_LR2021=1' in build_flags:
     # disallow setting 2400s for 900

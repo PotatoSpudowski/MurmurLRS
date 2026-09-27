@@ -15,6 +15,22 @@ jobs:
       - name: Run all crypto and acquisition tests
         run: make -C src/lib/MurmurEncrypt test
 
+  ota-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: python -m pip install platformio==6.1.19
+      - name: Test build-time key provisioning
+        run: python -m unittest discover -s src/python/tests -p 'test_murmur_key.py'
+      - name: Test production encrypted OTA hooks
+        working-directory: src
+        env:
+          MURMUR_BINDING_PHRASE: ci-only-not-a-secret
+        run: pio test -e native_murmur
+
   encrypted-firmware:
     runs-on: ubuntu-latest
     strategy:

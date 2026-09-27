@@ -4,6 +4,14 @@ All notable changes to MurmurLRS are documented here.
 
 ## Unreleased
 
+- Derive firmware encryption keys from the complete build-time phrase rather than the six-byte ELRS UID. Both endpoints must be rebuilt; older encrypted firmware is incompatible.
+- Require a nonempty phrase for encrypted builds and keep generated key material out of compiler flags and build logs.
+- Track TX counter wraps on timer ticks, including periods with no transmitted packets.
+- Advance the TX epoch on rate/binding resets to avoid reusing counters within a running session. Boot-time nonce reuse remains unresolved.
+- Reject repeated acquisition evidence and retain replay protection for acquisition packets through lock and relock.
+- Continue bounded acquisition searches beyond epoch 255 so late joins can find long-running transmitters.
+- Add CI tests against the production encrypted OTA hooks and build-time key provisioning.
+
 - Fixed the duplicate `MurmurTrackNonce` definition that prevented encrypted firmware builds (#17).
 - Restored ESP8285 TX EEPROM initialization and separate backpack/USB UARTs on classic ESP32.
 - Added a dedicated CI workflow for crypto tests and six explicitly encrypted firmware builds.

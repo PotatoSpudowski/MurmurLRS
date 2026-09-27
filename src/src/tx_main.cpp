@@ -658,6 +658,10 @@ void ICACHE_RAM_ATTR SendRCdataToRF()
 void ICACHE_RAM_ATTR nonceAdvance()
 {
   OtaNonce++;
+#if defined(MURMUR_ENCRYPT)
+  extern void MurmurTrackNonce();
+  MurmurTrackNonce();
+#endif
   if ((OtaNonce + 1) % ExpressLRS_currAirRate_Modparams->FHSShopInterval == 0)
   {
     ++FHSSptr;
@@ -696,7 +700,13 @@ void ICACHE_RAM_ATTR timerCallback()
 
   // Nonce advances on every timer tick
   if (!InBindingMode)
+  {
     OtaNonce++;
+#if defined(MURMUR_ENCRYPT)
+    extern void MurmurTrackNonce();
+    MurmurTrackNonce();
+#endif
+  }
 
   // If HandleTLM has started Receive mode, TLM packet reception should begin shortly
   // Skip transmitting on this slot
@@ -1403,9 +1413,9 @@ void setup()
 
     setupBindingFromConfig();
 #if defined(MURMUR_ENCRYPT)
-    extern void MurmurInitFromUid(const uint8_t uid[6], bool is_tx);
+    extern void MurmurInit(bool is_tx);
     extern void MurmurGetEncKey(uint8_t out[16]);
-    MurmurInitFromUid(UID, true);
+    MurmurInit(true);
     { uint8_t ek[16]; MurmurGetEncKey(ek); FHSSrandomiseFHSSsequenceSecure(ek); }
     DBGLN("MurmurLRS: encryption + FHSSv2 active (TX)");
 #else

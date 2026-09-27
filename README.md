@@ -54,22 +54,24 @@ git clone https://github.com/PotatoSpudowski/MurmurLRS
 
 1. Open [ELRS Configurator](https://github.com/ExpressLRS/ExpressLRS-Configurator/releases)
 2. Go to the **Local** tab, point it at the `src` folder
-3. Set your binding phrase (3-4 random words minimum, same on TX and RX)
+3. Set a long, randomly generated binding phrase at build time (same on TX and RX)
 4. Flash TX, flash RX
 
-Source builds enable encryption when a binding phrase is processed from `user_defines.txt` or `super_defines.txt`. The dedicated bench targets enable it explicitly. Setting a phrase only through runtime configuration does not enable code that was compiled without `MURMUR_ENCRYPT`. You'll see in the build log:
+Source builds enable encryption and provision the key from `MURMUR_BINDING_PHRASE` in the build environment, or `MY_BINDING_PHRASE` in `user_defines.txt` / `super_defines.txt`. The environment variable takes precedence. Encrypted builds without a nonempty build-time phrase fail. You'll see in the build log:
 
 ```
 MurmurLRS: encryption enabled
 ```
 
-For command-line smoke builds, explicitly set `-DMURMUR_ENCRYPT`: a binding phrase passed only through `PLATFORMIO_BUILD_FLAGS` does not run the phrase-processing hook. Build success alone does not prove an encrypted over-the-air link.
+For command-line builds, set `MURMUR_BINDING_PHRASE` in the environment, then run PlatformIO from `src/`. Use `PLATFORMIO_BUILD_FLAGS` for regulatory settings, not the phrase. The generated key header stays in the ignored build directory; compiler flags and build logs do not contain the phrase or key.
 
-Experimental non-PA LilyGO T3-S3 LR1121 TX/RX targets are defined in [lilygo-bench.ini](src/targets/lilygo-bench.ini), with a checked-in 2.4 GHz hardware profile. Hardware validation is tracked in [#21](https://github.com/PotatoSpudowski/MurmurLRS/issues/21).
+**Migration:** rebuild and flash both endpoints. The full-phrase key format is incompatible with older UID-derived firmware, even for the same phrase. Changing the phrase in the device's WiFi UI changes ELRS binding settings but does not replace the compiled encryption key; rebuild both endpoints to change that key. Firmware images and build directories contain the key and must be treated as secret.
+
+Experimental non-PA LilyGO T3-S3 LR1121 TX/RX targets are defined in [lilygo-bench.ini](src/targets/lilygo-bench.ini), with a checked-in 2.4 GHz hardware profile.
 
 ## How it works
 
-The current firmware hashes the ELRS six-byte UID with ASCON-XOF to obtain its 16-byte encryption key. A 16-byte output does not create 128 bits of entropy: this path is limited by the UID's 48-bit input space. The separate phrase KDF in the crypto library is not the firmware initialization path.
+The build derives a 16-byte key from the complete UTF-8 binding phrase using SHA-256 with a versioned MurmurLRS domain prefix. The six-byte ELRS UID is an identifier, not key material. This removes the UID-sized key-space limit; actual key strength still depends on the phrase. Derivation runs on the build computer and adds no per-packet hashing cost. The standalone ASCON-XOF phrase KDF in the C library is not the firmware provisioning path.
 
 ```
 TX:  RC data -> encrypt + authenticate -> transmit
@@ -81,8 +83,8 @@ Zero extra bytes. Same packet structure. Same air rate. The authentication tag r
 ## Security limits
 
 - Authentication tags are only 14 or 16 bits. An idealized single independent tag guess succeeds with probability 1/16,384 or 1/65,536; trying several counter candidates increases the number of verification opportunities.
-- Keys are currently derived from the six-byte UID. Treat UID disclosure as key disclosure.
-- Counter state resets on boot and can repeat within an epoch after a TX rate reset. Unique nonces across sessions and rate changes need a protocol-level fix.
+- Phrase derivation is a fast hash, not password stretching. The ELRS UID also permits checking phrase guesses, so use a high-entropy, unique phrase. Disclosure of the UID alone no longer directly determines the key.
+- TX rate changes reserve a fresh epoch, but counters still reset on boot and eventually wrap at 32 bits. Unique nonces across sessions need a protocol-level fix. Replay history is also reset during connection/rate reinitialization; it is not durable replay protection across sessions.
 - SYNC packets remain cleartext and use the stock CRC; they are not authenticated by the packet AEAD.
 - No forward secrecy is implemented. The project does not claim resistance to physical key extraction, jamming, or all packet injection attacks.
 
@@ -101,7 +103,11 @@ cd src/lib/MurmurEncrypt
 make test
 ```
 
-The C suite contains 62 tests covering cipher vectors, packet authentication, replay checks, FHSSv2, acquisition, and simulated long-running sessions. The native PlatformIO suite currently contains 147 tests. The [encrypted CI workflow](.github/workflows/murmur.yml) compiles six firmware targets with `MURMUR_ENCRYPT`, including both LilyGO bench roles; the upstream workflow exercises native tests and stock builds. Simulation does not replace over-the-air testing.
+The C suite contains 62 tests covering cipher vectors, packet authentication, replay checks, FHSSv2, acquisition, and simulated long-running sessions. The stock native PlatformIO suite contains 147 tests.
+
+`MURMUR_BINDING_PHRASE=ci-only-not-a-secret ../venv/bin/pio test -e native_murmur` (from `src/`) exercises the production encrypted OTA hooks for both packet sizes, replay-resistant acquisition/relock, packet loss, tampering, nonce wrap, rate transitions, and late joins beyond epoch 255. Python provisioning tests run with `python -m unittest discover -s src/python/tests -p test_murmur_key.py` from the repo root.
+
+The [encrypted CI workflow](.github/workflows/murmur.yml) compiles six firmware targets with `MURMUR_ENCRYPT`, including both LilyGO bench roles; the upstream workflow exercises native tests and stock builds. Simulation does not replace over-the-air testing.
 
 <details>
 <summary>Technical details</summary>
@@ -111,7 +117,7 @@ The C suite contains 62 tests covering cipher vectors, packet authentication, re
 **Key derivation:**
 ```
 ELRS binding-phrase define -> MD5 -> UID (first 6 bytes)
-UID -> ASCON-XOF -> enc_key (16B)
+"MurmurLRS/packet-key/v1" || NUL || UTF-8 phrase -> SHA-256 -> enc_key (first 16B)
 enc_key -> ASCON-XOF("MurmurFHSS" || enc_key) -> fhss_key (16B)
 fhss_key -> ASCON-XOF("FHSSv1" || fhss_key || domain_id) -> hop sequence
 ```

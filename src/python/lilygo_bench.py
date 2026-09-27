@@ -1,5 +1,4 @@
 """Attach the checked-in T3-S3 bench profile without changing downloaded targets."""
-import hashlib
 import json
 import os
 
@@ -19,9 +18,7 @@ if role == "TX" and os.environ.get("MURMUR_BENCH_FREERUN") == "1":
 
 def append_bench_profile(source, target, env):
     options = dict(env["OPTIONS_JSON"])
-    # Match the existing ELRS binding-phrase encoding, without printing the phrase.
-    binding_define = '-DMY_BINDING_PHRASE="' + phrase + '"'
-    options["uid"] = list(hashlib.md5(binding_define.encode()).digest()[:6])
+    # build_flags.py provisions both UID and the full-phrase encryption key.
     options["wifi-on-interval"] = -1
     profile = os.path.join(env["PROJECT_DIR"], "board_profiles", "lilygo_t3s3_lr1121.json")
     with open(str(target[0]), "r+b") as firmware:
