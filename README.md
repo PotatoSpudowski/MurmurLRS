@@ -67,8 +67,6 @@ For command-line builds, set `MURMUR_BINDING_PHRASE` in the environment, then ru
 
 **Migration:** rebuild and flash both endpoints. The full-phrase key format is incompatible with older UID-derived firmware, even for the same phrase. Changing the phrase in the device's WiFi UI changes ELRS binding settings but does not replace the compiled encryption key; rebuild both endpoints to change that key. Firmware images and build directories contain the key and must be treated as secret.
 
-Non-PA LilyGO T3-S3 LR1121 TX/RX targets are defined in [lilygo-bench.ini](src/targets/lilygo-bench.ini), with a checked-in 2.4 GHz hardware profile. Both roles are compiled in CI; over-the-air hardware validation is pending.
-
 ## How it works
 
 The build derives a 16-byte key from the complete UTF-8 binding phrase using SHA-256 with a versioned MurmurLRS domain prefix. The six-byte ELRS UID is an identifier, not key material. This removes the UID-sized key-space limit; actual key strength still depends on the phrase. Derivation runs on the build computer and adds no per-packet hashing cost. The standalone ASCON-XOF phrase KDF in the C library is not the firmware provisioning path.
