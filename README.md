@@ -65,7 +65,7 @@ MurmurLRS: encryption enabled
 
 For command-line smoke builds, explicitly set `-DMURMUR_ENCRYPT`: a binding phrase passed only through `PLATFORMIO_BUILD_FLAGS` does not run the phrase-processing hook. Build success alone does not prove an encrypted over-the-air link.
 
-For two LilyGO T3-S3 LR1121 boards, use the [dedicated bench guide](bench/lilygo-t3s3.md). It includes checked-in pin/RF-switch settings, build and upload commands, and a repeatable test checklist.
+Experimental non-PA LilyGO T3-S3 LR1121 TX/RX targets are defined in [lilygo-bench.ini](src/targets/lilygo-bench.ini), with a checked-in 2.4 GHz hardware profile. Hardware validation is tracked in [#21](https://github.com/PotatoSpudowski/MurmurLRS/issues/21).
 
 ## How it works
 
