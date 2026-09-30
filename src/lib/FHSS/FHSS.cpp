@@ -142,7 +142,14 @@ void FHSSrandomiseFHSSsequenceSecure(const uint8_t enc_key[16])
     murmur_derive_fhss_key(enc_key, fhss_key);
 
     primaryBandCount = (FHSS_SEQUENCE_LEN / FHSSconfig->freq_count) * FHSSconfig->freq_count;
-    murmur_fhss_fill_sequence(fhss_key, 0x00, FHSSsequence,
+    // Domain IDs identify the RF band, not its primary/secondary position.
+    // SX128X must match the 2.4 GHz secondary band of LR1121/LR2021 peers.
+#if defined(RADIO_SX128X)
+    constexpr uint8_t primaryDomain = 0x01;
+#else
+    constexpr uint8_t primaryDomain = 0x00;
+#endif
+    murmur_fhss_fill_sequence(fhss_key, primaryDomain, FHSSsequence,
                               primaryBandCount, FHSSconfig->freq_count, sync_channel);
 
     DBGLN("FHSSv2: ASCON-XOF CSPRNG sequence generated (primary)");
