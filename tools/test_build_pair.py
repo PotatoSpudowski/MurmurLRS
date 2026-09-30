@@ -1,4 +1,5 @@
 import hashlib
+import gzip
 import json
 import os
 from pathlib import Path
@@ -54,6 +55,19 @@ class PairBuildTests(unittest.TestCase):
             (source / 'bootloader.bin').write_bytes(b'boot')
             with self.assertRaises(ValueError):
                 bundle_role(source, root / 'rx')
+
+    def test_compressed_esp8285_image_has_plain_wired_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'source'
+            source.mkdir()
+            image = b'configured-encrypted-esp8285-image'
+            (source / 'firmware.bin.gz').write_bytes(gzip.compress(image))
+            destination = root / 'rx'
+            files = bundle_role(source, destination)
+            self.assertEqual((destination / 'firmware.bin').read_bytes(), image)
+            self.assertEqual({item['file'] for item in files}, {'firmware.bin', 'firmware.bin.gz'})
+            self.assertEqual((destination / 'firmware.bin').stat().st_mode & 0o777, 0o600)
 
     def test_rejects_wrong_target_or_role_or_missing_layout(self):
         with tempfile.TemporaryDirectory() as directory:

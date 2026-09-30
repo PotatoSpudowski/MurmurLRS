@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build a private TX/RX bundle from a committed revision; never flash devices."""
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -51,11 +52,19 @@ def profile_config(hardware, profile, target, role):
 def bundle_role(source, destination):
     destination.mkdir(mode=0o700)
     files = []
-    for artifact in sorted(source.glob('*.bin')):
+    artifacts = sorted(list(source.glob('*.bin')) + list(source.glob('*.bin.gz')))
+    for artifact in artifacts:
         copied = destination / artifact.name
         shutil.copyfile(artifact, copied)
         copied.chmod(0o600)
         files.append({'file': copied.name, 'sha256': hashlib.sha256(copied.read_bytes()).hexdigest()})
+    compressed = destination / 'firmware.bin.gz'
+    plain = destination / 'firmware.bin'
+    if compressed.is_file() and not plain.exists():
+        with gzip.open(compressed, 'rb') as firmware:
+            plain.write_bytes(firmware.read())
+        plain.chmod(0o600)
+        files.append({'file': plain.name, 'sha256': hashlib.sha256(plain.read_bytes()).hexdigest()})
     if not any(item['file'] == 'firmware.bin' for item in files):
         raise ValueError('Build produced no firmware.bin')
     return files
