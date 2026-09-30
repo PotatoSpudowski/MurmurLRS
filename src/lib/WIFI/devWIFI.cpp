@@ -25,6 +25,10 @@
 #include <StreamString.h>
 
 #include <ESPAsyncWebServer.h>
+#if defined(MURMUR_ENCRYPT)
+#include "MurmurWifiGuard.h"
+#include "murmur_wifi_generated.h"
+#endif
 
 #include "common.h"
 #include "rxtx_intf.h"
@@ -98,6 +102,9 @@ static const char VERSION[] = {LATEST_VERSION, 0};
 
 void setWifiUpdateMode()
 {
+#if defined(MURMUR_ENCRYPT)
+  if (!murmur_wifi_password[0]) return;
+#endif
   // No need to ExitBindingMode(), the radio will be stopped stopped when start the Wifi service.
   // Need to change this before the mode change event so the LED is updated
   InBindingMode = false;
@@ -160,7 +167,9 @@ static void WebUpdateHandleRoot(AsyncWebServerRequest *request)
   { // If captive portal redirect instead of displaying the page.
     return;
   }
+#if !defined(MURMUR_ENCRYPT)
   force_update = request->hasArg("force");
+#endif
   if (connectionState == hardwareUndefined)
   {
     request->redirect("/index.html#hardware");
@@ -548,6 +557,9 @@ static void GetConfiguration(AsyncWebServerRequest *request)
     settings["uidtype"] = GetConfigUidType(json);
     settings["ssid"] = station_ssid;
     settings["mode"] = wifiMode == WIFI_STA ? "STA" : "AP";
+#if defined(MURMUR_ENCRYPT)
+    settings["management-protected"] = true;
+#endif
     settings["wifi_dbm"] = wifi_GetClientRssi();
     settings["custom_hardware"] = hardware_flag(HARDWARE_customised);
     settings["target"] = &target_name[4];
@@ -1023,6 +1035,10 @@ static size_t getFirmwareChunk(uint8_t *data, size_t len, size_t pos)
 }
 
 static void WebUpdateGetFirmware(AsyncWebServerRequest *request) {
+#if defined(MURMUR_ENCRYPT)
+  // Never export a secret-bearing application image, even to an administrator.
+  request->send(403, "text/plain", "Firmware export disabled for encrypted builds");
+#else
   #if defined(PLATFORM_ESP32)
   const esp_partition_t *running = esp_ota_get_running_partition();
   if (running) {
@@ -1034,6 +1050,7 @@ static void WebUpdateGetFirmware(AsyncWebServerRequest *request) {
   String filename = String("attachment; filename=\"") + (const char *)&target_name[4] + "_" + VERSION + ".bin\"";
   response->addHeader("Content-Disposition", filename);
   request->send(response);
+#endif
 }
 
 static void HandleContinuousWave(AsyncWebServerRequest *request) {
@@ -1083,6 +1100,9 @@ static void HandleContinuousWave(AsyncWebServerRequest *request) {
 
 static bool initialize()
 {
+#if defined(MURMUR_ENCRYPT)
+  wifi_ap_password = murmur_wifi_password;
+#endif
   wifiStarted = false;
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
@@ -1097,6 +1117,9 @@ static bool initialize()
 
 static void startWiFi(unsigned long now)
 {
+#if defined(MURMUR_ENCRYPT)
+  if (!murmur_wifi_password[0]) return;
+#endif
   if (wifiStarted) {
     return;
   }
@@ -1121,8 +1144,14 @@ static void startWiFi(unsigned long now)
   WiFi.persistent(false);
   WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
+#if defined(MURMUR_ENCRYPT)
+  // Management HTTP is local to the protected AP, never exposed on a home LAN.
+  station_ssid[0] = 0;
+  station_password[0] = 0;
+#else
   strcpy(station_ssid, firmwareOptions.home_wifi_ssid);
   strcpy(station_password, firmwareOptions.home_wifi_password);
+#endif
   if (station_ssid[0] == 0) {
     changeTime = now;
     changeMode = WIFI_AP;
@@ -1200,7 +1229,7 @@ static void startMDNS()
   #endif
   #endif
 
-  #if defined(TARGET_TX) && defined(PLATFORM_ESP32)
+  #if defined(TARGET_TX) && defined(PLATFORM_ESP32) && !defined(MURMUR_ENCRYPT)
     MDNS.addService("elrs", "udp", JOYSTICK_PORT);
     MDNS.addServiceTxt("elrs", "udp", "device", (const char *)device_name);
     MDNS.addServiceTxt("elrs", "udp", "version", String(JOYSTICK_VERSION).c_str());
@@ -1253,6 +1282,10 @@ static void startServices()
     return;
   }
 
+#if defined(MURMUR_ENCRYPT)
+  server.addHandler(new MurmurWifiGuard(murmur_wifi_password, wifi_hostname, wifi_ap_address));
+#endif
+
   for (auto asset : WEB_ASSETS)
   {
       server.on(asset.path, WebUpdateSendContent);
@@ -1271,10 +1304,12 @@ static void startServices()
   server.on("/forceupdate", HTTP_OPTIONS, corsPreflightResponse);
   server.on("/cw", HandleContinuousWave);
 
+#if !defined(MURMUR_ENCRYPT)
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
   DefaultHeaders::Instance().addHeader("Access-Control-Max-Age", "600");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "POST,GET,OPTIONS");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
+#endif
 
   server.on("/hardware.json", HTTP_GET | HTTP_POST, getFile, nullptr, putFile);
   server.on("/options.json", HTTP_GET, getFile);
@@ -1315,13 +1350,13 @@ static void startServices()
 
   startMDNS();
 
-  #if defined(TARGET_TX) && defined(PLATFORM_ESP32)
+  #if defined(TARGET_TX) && defined(PLATFORM_ESP32) && !defined(MURMUR_ENCRYPT)
     WifiJoystick::StartJoystickService();
   #endif
 
   servicesStarted = true;
   DBGLN("HTTPUpdateServer ready! Open http://%s.local in your browser", wifi_hostname);
-  #if defined(TARGET_RX)
+  #if defined(TARGET_RX) && !defined(MURMUR_ENCRYPT)
   wifi2tcp.begin();
   #endif
 }
@@ -1430,12 +1465,18 @@ static void HandleWebUpdate()
 
 static int start()
 {
+#if defined(MURMUR_ENCRYPT)
+  if (!murmur_wifi_password[0]) return DURATION_NEVER;
+#endif
   ipAddress.fromString(wifi_ap_address);
   return firmwareOptions.wifi_auto_on_interval;
 }
 
 static int event()
 {
+#if defined(MURMUR_ENCRYPT)
+  if (!murmur_wifi_password[0]) return DURATION_NEVER;
+#endif
   if (connectionState == wifiUpdate || connectionState > FAILURE_STATES)
   {
     if (!wifiStarted) {
@@ -1457,6 +1498,9 @@ static int event()
 
 static int timeout()
 {
+#if defined(MURMUR_ENCRYPT)
+  if (!murmur_wifi_password[0]) return DURATION_NEVER;
+#endif
   if (wifiStarted)
   {
     HandleWebUpdate();

@@ -8,11 +8,14 @@ import time
 import re
 import elrs_helpers
 from murmur_key import write_key_header
+from murmur_wifi import write_wifi_header
 
 build_flags = env.get('BUILD_FLAGS', [])
 if any('MY_BINDING_PHRASE' in flag for flag in build_flags):
     raise ValueError('Set MURMUR_BINDING_PHRASE in the environment or use user_defines.txt; '
                      'do not put binding phrases in compiler flags')
+if any('MURMUR_WIFI_PASSWORD' in flag for flag in build_flags):
+    raise ValueError('Set MURMUR_WIFI_PASSWORD in the environment, not compiler flags')
 json_flags = {}
 UIDbytes = ""
 define = ""
@@ -74,6 +77,8 @@ def process_json_flag(define):
 def process_build_flag(define):
     global murmur_phrase
     if define.startswith("-D") or define.startswith("!-D"):
+        if 'MURMUR_WIFI_PASSWORD' in define:
+            raise ValueError('Set MURMUR_WIFI_PASSWORD in the environment, not user defines')
         if "MY_BINDING_PHRASE" in define:
             phrase_match = re.fullmatch(r'-DMY_BINDING_PHRASE="(.*)"', define)
             if not phrase_match:
@@ -167,6 +172,10 @@ condense_flags()
 
 if any(re.search(r'(?:^|\s)-DMURMUR_ENCRYPT(?:=\S+)?(?:\s|$)', flag) for flag in build_flags):
     write_key_header(env.subst("$BUILD_DIR"), murmur_phrase)
+    wifi_password = os.environ.get("MURMUR_WIFI_PASSWORD")
+    write_wifi_header(env.subst("$BUILD_DIR"), wifi_password, murmur_phrase)
+    sys.stdout.write("MurmurLRS: protected Wi-Fi management provisioned\n" if wifi_password else
+                     "MurmurLRS: Wi-Fi management disabled (no credential provisioned)\n")
     env.Append(CPPPATH=[env.subst("$BUILD_DIR")])
 
 if '-DRADIO_SX127X=1' in build_flags or '-DRADIO_LR1121=1' in build_flags or '-DRADIO_LR2021=1' in build_flags:

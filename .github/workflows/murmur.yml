@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install platformio==6.1.19
-      - name: Test build-time key provisioning
+      - name: Test build-time key and Wi-Fi provisioning
         run: python -m unittest discover -s src/python/tests -p 'test_murmur_key.py'
       - name: Test production OTA hooks and session recovery
         working-directory: src
@@ -86,4 +86,5 @@ jobs:
           PLATFORMIO_BUILD_FLAGS: '-DMURMUR_ENCRYPT -DRegulatory_Domain_FCC_915'
           MURMUR_BINDING_PHRASE: ci-only-not-a-secret
           MURMUR_BENCH_FREERUN: '1'
+          MURMUR_WIFI_PASSWORD: '0123456789abcdef0123456789abcdef'
         run: pio run -e "${{ matrix.target }}"

@@ -43,6 +43,7 @@ class WifiPanel extends LitElement {
     }
 
     updated(_) {
+        if (elrsState.settings['management-protected']) return
         if (!this.running) this._getNetworks()
         this.running = true
     }
@@ -52,6 +53,15 @@ class WifiPanel extends LitElement {
     }
 
     render() {
+        if (elrsState.settings['management-protected']) {
+            return html`
+                <div class="mui-panel mui--text-title">WiFi Configuration</div>
+                <div class="mui-panel">
+                    Connect directly to this device using your management credential.
+                    Home-network connections are disabled for this build.
+                </div>
+            `
+        }
         return html`
             <div class="mui-panel mui--text-title">WiFi Configuration</div>
             <div class="mui-panel">

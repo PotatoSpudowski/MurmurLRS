@@ -2,6 +2,7 @@ import {html, LitElement} from "lit"
 import {customElement, state} from "lit/decorators.js"
 import '../components/filedrag.js'
 import {post, showAlert, showConfirm} from "../utils/feedback.js"
+import {elrsState} from "../utils/state.js"
 
 @customElement('update-panel')
 class UpdatePanel extends LitElement {
@@ -29,8 +30,9 @@ class UpdatePanel extends LitElement {
                     <strong>firmware.bin</strong>
                     <!-- /FEATURE:NOT IS_8285 -->
                     for your platform otherwise a bad flash may occur.
-                    If this happens you will need to recover via USB/Serial. You may also download the <a
-                        href="firmware.bin" title="Click to download firmware">currently running firmware</a>.
+                    If this happens you will need to recover via USB/Serial.
+                    ${elrsState.settings['management-protected'] ? '' : html`You may also download the <a
+                        href="firmware.bin" title="Click to download firmware">currently running firmware</a>.`}
                 </p>
                 <file-drop id="firmware-upload" label="Select firmware file" @file-drop="${this._fileSelectHandler}">or drop firmware file here</file-drop>
                 <br/>

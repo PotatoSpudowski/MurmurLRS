@@ -79,8 +79,8 @@ cd src
 MURMUR_BINDING_PHRASE=ci-only-not-a-secret ../venv/bin/pio test -e native_murmur
 ```
 
-This runs 44 tests. Add `PLATFORMIO_BUILD_FLAGS=-DMURMUR_LINK_DIAGNOSTICS` to
-include the diagnostic regression for 45 tests. The phrase above is only a public
+This runs 52 tests. Add `PLATFORMIO_BUILD_FLAGS=-DMURMUR_LINK_DIAGNOSTICS` to
+include the diagnostic regression for 53 tests. The phrase above is only a public
 test fixture.
 
 ## Syncing with upstream ExpressLRS

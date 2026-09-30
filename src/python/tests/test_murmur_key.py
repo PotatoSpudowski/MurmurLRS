@@ -32,7 +32,7 @@ class BuildEnv(dict):
 
 
 class ProvisioningTests(unittest.TestCase):
-    def run_build(self, phrase=None, user='', overrides='', flags=None):
+    def run_build(self, phrase=None, user='', overrides='', flags=None, wifi_password=None):
         with tempfile.TemporaryDirectory() as root:
             root = Path(root)
             (root / 'user_defines.txt').write_text(user)
@@ -42,13 +42,18 @@ class ProvisioningTests(unittest.TestCase):
             helper = types.SimpleNamespace(get_git_version=lambda: {'sha': 'test', 'version': 'test'})
             output = io.StringIO()
             previous = Path.cwd()
+            variables = {} if phrase is None else {'MURMUR_BINDING_PHRASE': phrase}
+            if wifi_password is not None:
+                variables['MURMUR_WIFI_PASSWORD'] = wifi_password
             try:
                 os.chdir(root)
-                with patch.dict(os.environ, {} if phrase is None else {'MURMUR_BINDING_PHRASE': phrase}, clear=True), \
+                with patch.dict(os.environ, variables, clear=True), \
                      patch.dict(sys.modules, {'elrs_helpers': helper}), contextlib.redirect_stdout(output):
                     runpy.run_path(str(PYTHON_DIR / 'build_flags.py'),
                                    init_globals={'Import': lambda _: None, 'env': env})
                 header = root / 'build/murmur_key_generated.h'
+                wifi_header = root / 'build/murmur_wifi_generated.h'
+                env['_wifi_header'] = wifi_header.read_text() if wifi_header.exists() else None
                 return env, header.read_text() if header.exists() else None, output.getvalue()
             finally:
                 os.chdir(previous)
@@ -57,6 +62,41 @@ class ProvisioningTests(unittest.TestCase):
         env, header, _ = self.run_build()
         self.assertIsNone(header)
         self.assertNotIn('-DMURMUR_ENCRYPT', env['BUILD_FLAGS'])
+
+    def test_stock_build_does_not_provision_wifi_credential(self):
+        env, _, _ = self.run_build(wifi_password='a' * 32)
+        self.assertIsNone(env['_wifi_header'])
+
+    def test_encrypted_wifi_is_unprovisioned_by_default(self):
+        env, _, log = self.run_build(phrase='packet secret')
+        self.assertIn('murmur_wifi_password[] = ""', env['_wifi_header'])
+        self.assertNotIn('expresslrs', env['_wifi_header'])
+        self.assertIn('Wi-Fi management disabled', log)
+
+    def test_wifi_credential_is_separate_and_not_logged_or_in_options(self):
+        password = '0123456789abcdef' * 2
+        env, key_header, log = self.run_build(phrase='packet secret', wifi_password=password)
+        self.assertIn(password, env['_wifi_header'])
+        self.assertNotIn(password, log)
+        self.assertNotIn(password, str(env['BUILD_FLAGS']))
+        self.assertNotIn(password, str(env['OPTIONS_JSON']))
+        self.assertNotIn(password, key_header)
+        self.assertNotIn('packet secret', env['_wifi_header'])
+
+    def test_wifi_credential_rejects_empty_short_nonhex_and_injection(self):
+        for password in ('', 'a' * 31, 'a' * 33, 'g' * 32, 'a' * 31 + '\n', '";inject();//'):
+            with self.subTest(length=len(password)), self.assertRaisesRegex(ValueError, '32 random'):
+                self.run_build(phrase='packet secret', wifi_password=password)
+
+    def test_wifi_credential_rejects_binding_phrase_reuse(self):
+        with self.assertRaisesRegex(ValueError, 'separate'):
+            self.run_build(phrase='a' * 32, wifi_password='A' * 32)
+
+    def test_wifi_secret_rejected_in_compiler_flags_or_user_defines(self):
+        with self.assertRaisesRegex(ValueError, 'environment'):
+            self.run_build(flags=['-DMURMUR_WIFI_PASSWORD="secret"'])
+        with self.assertRaisesRegex(ValueError, 'environment'):
+            self.run_build(user='-DMURMUR_WIFI_PASSWORD="secret"\n')
 
     def test_encryption_without_phrase_fails(self):
         for flag in ('-DMURMUR_ENCRYPT', '-DMURMUR_ENCRYPT=1', '-DMURMUR_ENCRYPT=0'):

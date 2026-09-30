@@ -4,9 +4,12 @@ All notable changes to MurmurLRS are documented here.
 
 ## Unreleased
 
+- Secure the Wi-Fi maintenance interface separately from the encrypted TX/RX radio link. Previously, unauthenticated firmware downloads could expose the compiled packet key; encrypted builds now block firmware export.
+- Require a separate build-time management password for the protected device hotspot and HTTP Basic login (`admin`). Authenticate requests before upload/configuration bodies reach their handlers, reject cross-origin requests, and disable home-network management and unauthenticated TCP/MSP and UDP joystick services.
+- Leave Wi-Fi management off unless `MURMUR_WIFI_PASSWORD` is provisioned; wired flashing remains available. The management password is separate from the binding phrase. This protects network access, but does not add HTTPS, firmware signing, or protection against physical flash extraction. Preserve stock-build behavior and add management/provisioning regressions.
 - Fix encrypted 2.4 GHz hopping between SX128x receivers and LR1121/LR2021 transmitters by assigning FHSS domain IDs by RF band rather than primary/secondary slot (`1766c1b8`).
 - Add opt-in receiver authentication, epoch, session, and validation-time diagnostics through a read-only CRSF info field. Refresh the snapshot on the first parameter chunk; omit instrumentation from normal builds (`fcc517e5`).
-- Exercise diagnostics in encrypted CI alongside the normal OTA tests: 44 tests normally, 45 with diagnostics (`1494c204`).
+- Exercise diagnostics in encrypted CI alongside the normal OTA tests (`1494c204`); the suite now includes 52 tests normally, 53 with diagnostics.
 - Clarify telemetry requirements for authenticated sessions.
 
 - Integrated the HMAC-SHA-256/HKDF session protocol into TX/RX, with boot-seeded challenges, directional traffic keys, bounded ISR mailboxes, and retry/reboot recovery. Application traffic waits for confirmation; hardware validation remains separate from host tests and build checks.
