@@ -158,6 +158,17 @@ service exposure, and lack of forward secrecy remain protocol limitations.
 
 ## Tests
 
+For wired link diagnosis, add `-DMURMUR_LINK_DIAGNOSTICS` to an encrypted
+build. The receiver exposes a read-only **Murmur Diagnostics** CRSF info field:
+key availability (`K`), receive epoch lock (`L`), send/receive epochs (`E`),
+accepted/rejected application packets (`OK`/`FAIL`), maximum validation time
+(`MAX`), session key installations (`NEW`), and counter resets (`RESET`).
+Rejected counts include acquisition trials and replays. Counters accumulate
+until reboot; a read's first chunk refreshes its snapshot. No key material or
+channel payload is exported. The timing instrumentation is absent when the
+flag is omitted. Run `native_murmur` with the same flag to include the
+diagnostic authentication/replay regression.
+
 From `src/`:
 
 ```

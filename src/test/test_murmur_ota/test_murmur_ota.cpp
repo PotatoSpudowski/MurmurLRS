@@ -429,6 +429,29 @@ void test_cleartext_sync_is_discovery_only()
     }
 }
 
+#if defined(MURMUR_LINK_DIAGNOSTICS)
+void test_diagnostics_preserve_authentication_and_replay_results()
+{
+    prepare(OTA4_PACKET_SIZE);
+    const auto before = MurmurGetDiagnostics();
+    TEST_ASSERT_TRUE(before.keysReady);
+    TEST_ASSERT_FALSE(before.epochLocked);
+    TEST_ASSERT_FALSE(receive(0, 10));
+    TEST_ASSERT_FALSE(receive(1, 11));
+    TEST_ASSERT_TRUE(receive(2, 12));
+    TEST_ASSERT_FALSE(receive(2, 12));
+    const auto after = MurmurGetDiagnostics();
+    TEST_ASSERT_EQUAL_UINT32(before.accepted + 1, after.accepted);
+    TEST_ASSERT_EQUAL_UINT32(before.rejected + 3, after.rejected);
+    TEST_ASSERT_TRUE(after.epochLocked);
+    MurmurResetCounter();
+    const auto reset = MurmurGetDiagnostics();
+    TEST_ASSERT_EQUAL_UINT32(after.resets + 1, reset.resets);
+    TEST_ASSERT_TRUE(reset.keysReady);
+    TEST_ASSERT_FALSE(reset.epochLocked);
+}
+#endif
+
 int main()
 {
     UNITY_BEGIN();
@@ -450,5 +473,8 @@ int main()
     RUN_TEST(test_counter_exhaustion_blocks_application_packets);
     RUN_TEST(test_sparse_downlink_acquires_across_epochs);
     RUN_TEST(test_cleartext_sync_is_discovery_only);
+#if defined(MURMUR_LINK_DIAGNOSTICS)
+    RUN_TEST(test_diagnostics_preserve_authentication_and_replay_results);
+#endif
     return UNITY_END();
 }

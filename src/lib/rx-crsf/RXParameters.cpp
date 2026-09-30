@@ -9,6 +9,14 @@
 #include "helpers.h"
 #include "rxtx_intf.h"
 #include "logging.h"
+#if defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
+#include "OTA.h"
+#include <cstdio>
+static char murmurDiagnosticText[160];
+static stringParameter luaMurmurDiagnostics = {
+    {"Murmur Diagnostics", CRSF_INFO}, murmurDiagnosticText
+};
+#endif
 
 #define RX_HAS_SERIAL1 (GPIO_PIN_SERIAL1_TX != UNDEF_PIN || OPT_HAS_SERVO_OUTPUT)
 
@@ -606,6 +614,9 @@ void RXEndpoint::registerParameters()
 
   registerParameter(&luaModelNumber);
   registerParameter(&luaELRSversion);
+#if defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
+  registerParameter(&luaMurmurDiagnostics);
+#endif
 }
 
 static void updateBindModeLabel()
@@ -618,6 +629,16 @@ static void updateBindModeLabel()
 
 void RXEndpoint::updateParameters()
 {
+#if defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
+  const auto stats = MurmurGetDiagnostics();
+  snprintf(murmurDiagnosticText, sizeof(murmurDiagnosticText),
+      "K:%u L:%u E:%lu/%lu OK:%lu FAIL:%lu MAX:%luus NEW:%lu RESET:%lu",
+      unsigned(stats.keysReady), unsigned(stats.epochLocked),
+      (unsigned long)stats.sendEpoch, (unsigned long)stats.receiveEpoch,
+      (unsigned long)stats.accepted, (unsigned long)stats.rejected,
+      (unsigned long)stats.maxValidationUs, (unsigned long)stats.installs,
+      (unsigned long)stats.resets);
+#endif
   setTextSelectionValue(&luaSerialProtocol, config.GetSerialProtocol());
 #if defined(PLATFORM_ESP32)
   if (RX_HAS_SERIAL1)

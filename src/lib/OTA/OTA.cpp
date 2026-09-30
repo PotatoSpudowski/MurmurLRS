@@ -43,6 +43,20 @@ static uint8_t  murmur_lock_fail_count = 0;
 #define MURMUR_LOCK_FAIL_MAX 16
 #define MURMUR_MAX_EPOCH 0xFFFFFFU
 
+#if defined(MURMUR_LINK_DIAGNOSTICS)
+static MurmurDiagnostics murmur_diagnostics = {};
+MurmurDiagnostics MurmurGetDiagnostics()
+{
+    MurmurLock lock;
+    auto result = murmur_diagnostics;
+    result.sendEpoch = murmur_send_epoch;
+    result.receiveEpoch = murmur_nonce_epoch;
+    result.keysReady = murmur_key_ready;
+    result.epochLocked = murmur_epoch_locked;
+    return result;
+}
+#endif
+
 #if defined(UNIT_TEST)
 void MurmurTestSetSendEpoch(uint32_t epoch) { murmur_send_epoch = epoch; }
 #endif
@@ -70,6 +84,9 @@ static void MurmurInvalidateSession()
 void MurmurInstallSessionKeys(const uint8_t up[16], const uint8_t down[16])
 {
     MurmurLock lock;
+#if defined(MURMUR_LINK_DIAGNOSTICS)
+    ++murmur_diagnostics.installs;
+#endif
     memcpy(murmur_send_key, murmur_is_tx ? up : down, 16);
     memcpy(murmur_receive_key, murmur_is_tx ? down : up, 16);
     murmur_send_epoch = 0;
@@ -144,6 +161,9 @@ void MurmurResetCounter()
     MurmurLock lock;
     if (!murmur_key_ready) return;
     // Rate/disconnect events do not clear accepted history or reinstall keys.
+#if defined(MURMUR_LINK_DIAGNOSTICS)
+    ++murmur_diagnostics.resets;
+#endif
     ++murmur_send_epoch;
     murmur_send_prev = OtaNonce;
     murmur_prev_nonce = OtaNonce;
@@ -228,7 +248,7 @@ static void ICACHE_RAM_ATTR MurmurGeneratePacketCrc(OTA_Packet_s * const otaPktP
     }
 }
 
-static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktPtr)
+static bool ICACHE_RAM_ATTR MurmurValidatePacketCrcImpl(OTA_Packet_s * const otaPktPtr)
 {
     MurmurLock lock;
     uint8_t raw_header = ((uint8_t*)otaPktPtr)[0];
@@ -376,6 +396,25 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
         murmur_acquire_scan_pos = 0;
     }
     return false;
+}
+static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktPtr)
+{
+#if defined(MURMUR_LINK_DIAGNOSTICS)
+    const uint8_t type = otaPktPtr->std.type;
+    const uint32_t start = micros();
+#endif
+    const bool accepted = MurmurValidatePacketCrcImpl(otaPktPtr);
+#if defined(MURMUR_LINK_DIAGNOSTICS)
+    MurmurLock lock;
+    const uint32_t elapsed = micros() - start;
+    if (elapsed > murmur_diagnostics.maxValidationUs)
+        murmur_diagnostics.maxValidationUs = elapsed;
+    if (type == PACKET_TYPE_RCDATA || type == PACKET_TYPE_DATA) {
+        if (accepted) ++murmur_diagnostics.accepted;
+        else ++murmur_diagnostics.rejected;
+    }
+#endif
+    return accepted;
 }
 #endif // MURMUR_ENCRYPT
 // ================ End MurmurLRS Encryption ================

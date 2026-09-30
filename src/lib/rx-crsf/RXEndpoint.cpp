@@ -48,6 +48,14 @@ bool RXEndpoint::handleRaw(const crsf_header_t *message)
 void RXEndpoint::handleMessage(const crsf_header_t *message)
 {
     const auto extMessage = (crsf_ext_header_t *)message;
+#if defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
+    // Freeze one fresh snapshot for all chunks of a diagnostic read.
+    if (message->type == CRSF_FRAMETYPE_PARAMETER_READ &&
+        message->frame_size >= 6 && extMessage->payload[1] == 0)
+    {
+        updateParameters();
+    }
+#endif
 
     if (handleRxTxMessage(message))
     {
