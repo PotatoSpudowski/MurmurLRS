@@ -30,6 +30,12 @@ jobs:
         env:
           MURMUR_BINDING_PHRASE: ci-only-not-a-secret
         run: pio test -e native_murmur
+      - name: Test opt-in link diagnostics
+        working-directory: src
+        env:
+          MURMUR_BINDING_PHRASE: ci-only-not-a-secret
+          PLATFORMIO_BUILD_FLAGS: '-DMURMUR_LINK_DIAGNOSTICS'
+        run: pio test -e native_murmur
       - name: Sanitize session parser, framing, and handshake
         working-directory: src
         run: |
