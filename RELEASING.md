@@ -8,7 +8,7 @@ A commit identifies source code. A build compiles that source for a particular b
 
 1. Select a committed revision and verify its GitHub Actions results: encrypted host/crypto/provisioning/packaging checks, sanitizers, encrypted firmware matrix, and the inherited stock checks.
 2. Confirm the migration notes and known protocol limitations describe that revision. Do not present compilation as hardware qualification.
-3. Assign a MurmurLRS version independently of the upstream ExpressLRS version. Create an annotated version tag at the checked revision and publish release notes summarizing changes, compatibility requirements, and verification scope.
+3. Assign a MurmurLRS version independently of the upstream ExpressLRS version. Add a matching numbered changelog section, such as `## v0.9.0 (2026-10-01)`, summarizing changes, compatibility requirements, and verification scope. After committing and passing CI, run the manual **Publish MurmurLRS source release** workflow on that revision with the version as input. It checks both CI workflows on the exact commit before creating the release and refuses to move an existing tag.
 4. Publish source archives and release notes. Do not attach private paired firmware, generated key headers, credentials, internal testing notes, or raw captures.
 
 ## Private device builds

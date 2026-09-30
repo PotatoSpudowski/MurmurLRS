@@ -1,0 +1,56 @@
+name: Publish MurmurLRS source release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version with a matching changelog section, e.g. v0.9.0'
+        required: true
+        type: string
+permissions:
+  contents: write
+  actions: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify revision and publish source release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          version = os.environ['RELEASE_VERSION']
+          if not re.fullmatch(r'v\d+\.\d+\.\d+', version):
+              raise SystemExit('Use a version such as v0.9.0')
+          sha = os.environ['GITHUB_SHA']
+          repo = os.environ['GITHUB_REPOSITORY']
+          runs = json.loads(subprocess.check_output([
+              'gh', 'api', f'repos/{repo}/actions/runs?head_sha={sha}&per_page=100']))['workflow_runs']
+          for workflow in ('build.yml', 'murmur.yml'):
+              matching = sorted((run for run in runs if run['path'] == f'.github/workflows/{workflow}'),
+                                key=lambda run: (run['id'], run.get('run_attempt', 1)), reverse=True)
+              if not matching or matching[0]['status'] != 'completed' or matching[0]['conclusion'] != 'success':
+                  raise SystemExit(f'{workflow} must pass on this exact revision before release')
+          changelog = Path('CHANGELOG.md').read_text()
+          section = re.search(r'^## ' + re.escape(version) + r'(?:[ \t]+[^\n]*)?\n(.*?)(?=^## |\Z)',
+                              changelog, flags=re.MULTILINE | re.DOTALL)
+          if not section or not section.group(1).strip():
+              raise SystemExit('Add a nonempty numbered changelog section before release')
+          notes = Path('release-notes.md')
+          notes.write_text(section.group(1).strip() + '\n\nSource release. Build privately provisioned TX/RX firmware locally; no paired firmware or credentials are attached.\n')
+          # Validate an existing tag if present; never move an existing release tag.
+          subprocess.run(['git', 'fetch', '--tags', '--quiet'], check=True)
+          tag = subprocess.run(['git', 'rev-parse', '--verify', f'refs/tags/{version}^{{commit}}'],
+                               text=True, capture_output=True)
+          if tag.returncode == 0 and tag.stdout.strip() != sha:
+              raise SystemExit('Existing version tag points to a different revision')
+          subprocess.run(['gh', 'release', 'create', version, '--repo', repo, '--target', sha,
+                          '--title', f'MurmurLRS {version}', '--notes-file', str(notes)], check=True)
+          PY

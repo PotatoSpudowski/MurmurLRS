@@ -4,7 +4,7 @@ All notable changes to MurmurLRS are documented here.
 
 ## Unreleased
 
-- Add a private TX/RX pair builder with explicit board profiles, isolated source checkout, restricted output permissions, matching Lua script, and revision/checksum manifest. Add packaging regressions to CI and document source-release policy.
+- Add a private TX/RX pair builder with explicit board profiles, isolated source checkout, restricted output permissions, matching Lua script, and revision/checksum manifest. Add packaging regressions to CI and a manual source-release workflow gated on passing checks and numbered release notes.
 - Secure the Wi-Fi maintenance interface separately from the encrypted TX/RX radio link. Previously, unauthenticated firmware downloads could expose the compiled packet key; encrypted builds now block firmware export.
 - Require a separate build-time management password for the protected device hotspot and HTTP Basic login (`admin`). Authenticate requests before upload/configuration bodies reach their handlers, reject cross-origin requests, and disable home-network management and unauthenticated TCP/MSP and UDP joystick services.
 - Leave Wi-Fi management off unless `MURMUR_WIFI_PASSWORD` is provisioned; wired flashing remains available. The management password is separate from the binding phrase. This protects network access, but does not add HTTPS, firmware signing, or protection against physical flash extraction. Preserve stock-build behavior and add management/provisioning regressions.
