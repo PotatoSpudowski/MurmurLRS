@@ -19,11 +19,14 @@ The most valuable contribution right now is real-world testing. Flash MurmurLRS 
 - TX/RX link establishment and stability
 - Rate switching and reconnection
 - Failsafe behavior under encryption
-- Range (should be identical to stock ELRS)
+- Range and end-to-end latency compared with stock ELRS on the same hardware/settings
 - Different hardware targets (ESP32, ESP32-S3, ESP32-C3, ESP8285)
 - 900 MHz and 2.4 GHz
 
 **How to report:** Open an issue with your hardware, firmware version, what you tested, and what happened.
+
+Keep private phrases, secret-bearing firmware images, and raw device backups out
+of reports.
 
 ### Review the crypto
 
@@ -67,6 +70,18 @@ make test
 cd src
 pio test -e native
 ```
+
+Exercise the production encryption path separately; the stock native suite does
+not compile those guards:
+
+```bash
+cd src
+MURMUR_BINDING_PHRASE=ci-only-not-a-secret ../venv/bin/pio test -e native_murmur
+```
+
+This runs 44 tests. Add `PLATFORMIO_BUILD_FLAGS=-DMURMUR_LINK_DIAGNOSTICS` to
+include the diagnostic regression for 45 tests. The phrase above is only a public
+test fixture.
 
 ## Syncing with upstream ExpressLRS
 

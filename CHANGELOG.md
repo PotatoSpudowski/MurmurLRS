@@ -4,6 +4,11 @@ All notable changes to MurmurLRS are documented here.
 
 ## Unreleased
 
+- Fix encrypted 2.4 GHz hopping between SX128x receivers and LR1121/LR2021 transmitters by assigning FHSS domain IDs by RF band rather than primary/secondary slot (`1766c1b8`).
+- Add opt-in receiver authentication, epoch, session, and validation-time diagnostics through a read-only CRSF info field. Refresh the snapshot on the first parameter chunk; omit instrumentation from normal builds (`fcc517e5`).
+- Exercise diagnostics in encrypted CI alongside the normal OTA tests: 44 tests normally, 45 with diagnostics (`1494c204`).
+- Clarify telemetry requirements for authenticated sessions.
+
 - Integrated the HMAC-SHA-256/HKDF session protocol into TX/RX, with boot-seeded challenges, directional traffic keys, bounded ISR mailboxes, and retry/reboot recovery. Application traffic waits for confirmation; hardware validation remains separate from host tests and build checks.
 - Preserve replay history across rate/connection changes, separate outgoing counters from receive synchronization, and stop traffic before counter exhaustion.
 - Require bidirectional telemetry in encrypted mode and add recovery-adapter and production OTA integration tests.
@@ -18,7 +23,7 @@ All notable changes to MurmurLRS are documented here.
 
 - Fixed the duplicate `MurmurTrackNonce` definition that prevented encrypted firmware builds (#17).
 - Restored ESP8285 TX EEPROM initialization and separate backpack/USB UARTs on classic ESP32.
-- Added a dedicated CI workflow for crypto tests and six explicitly encrypted firmware builds.
+- Added a dedicated CI workflow for crypto tests, production OTA/session tests, sanitizers, provisioning tests, and seven explicitly encrypted firmware builds.
 - Added experimental non-PA LilyGO T3-S3 LR1121 TX/RX bench targets, a checked-in 2.4 GHz hardware profile, and an optional TX free-run mode.
 - Documented the ExpressLRS 4.1.0-derived upstream base (#18), actual UID-based key derivation, short authentication tags, and session/nonce limitations.
 

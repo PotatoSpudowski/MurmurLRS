@@ -29,12 +29,13 @@ Use the same MurmurLRS revision, binding phrase, and compatible RF settings on b
 - **Cryptographic FHSS (FHSSv2).** ASCON-XOF generates a keyed hop sequence, with rejection sampling and Fisher–Yates shuffling. Its secrecy depends on the encryption key's secrecy.
 - **Replay window.** A 64-packet sliding window checks reconstructed counters and survives connection/rate resets within a session. New sessions install fresh directional keys after an authenticated challenge exchange.
 - **Epoch acquisition.** The RX searches candidate epochs and requires consecutive authentication matches before locking. Acquisition and reboot recovery remain important hardware test cases.
+- **Link diagnostics.** Optional receiver counters expose authentication outcomes, session installations, epoch lock, and packet-validation timing without exporting keys or channel payloads. See the [session protocol and diagnostics](src/lib/MurmurSession/README.md).
 
 ### Roadmap
 
 - **Adaptive TX power** ([#8](https://github.com/PotatoSpudowski/MurmurLRS/issues/8)). Three-priority dynamic power: emergency ramp on LQ drop, RSSI-based stepping, and power decay when the link is healthy. A proposed additional timed decay policy would build on the existing upstream power increases and decreases. This reduces unnecessary RF output and saves battery.
 
-- **Telemetry modes** ([#9](https://github.com/PotatoSpudowski/MurmurLRS/issues/9)). Full (default), minimal (critical alerts only), or silent (uplink-only, zero RX emissions). The existing telemetry ratio already provides an Off setting; priority filtering remains a separate proposal.
+- **Telemetry modes** ([#9](https://github.com/PotatoSpudowski/MurmurLRS/issues/9)). Priority filtering could reduce application telemetry while retaining handshake, recovery, and link-health traffic. Zero-emission RX operation would require a different session protocol; encrypted mode currently requires return traffic.
 
 - **N-band diversity** ([#10](https://github.com/PotatoSpudowski/MurmurLRS/issues/10)). ELRS Gemini supports 2 simultaneous bands. Support for three or more radios/bands is a protocol and hardware proposal, not an implemented mode.
 
@@ -105,7 +106,7 @@ make test
 
 The C suite contains 62 tests covering cipher vectors, packet authentication, replay checks, FHSSv2, acquisition, and simulated long-running sessions. The stock native PlatformIO suite contains 147 tests.
 
-`MURMUR_BINDING_PHRASE=ci-only-not-a-secret ../venv/bin/pio test -e native_murmur` (from `src/`) exercises the production encrypted OTA hooks for both packet sizes, replay-resistant acquisition/relock, packet loss, tampering, nonce wrap, rate transitions, and late joins beyond epoch 255. It also tests session negotiation through the OTA hooks, independent reboots, entropy failure, counter exhaustion, and bounded recovery mailboxes. Python provisioning tests run with `python -m unittest discover -s src/python/tests -p test_murmur_key.py` from the repo root.
+`MURMUR_BINDING_PHRASE=ci-only-not-a-secret ../venv/bin/pio test -e native_murmur` (from `src/`) runs 44 tests exercising the production encrypted OTA hooks for both packet sizes, replay-resistant acquisition/relock, packet loss, tampering, nonce wrap, rate transitions, and late joins beyond epoch 255. It also tests session negotiation through the OTA hooks, independent reboots, entropy failure, counter exhaustion, and bounded recovery mailboxes. Adding `PLATFORMIO_BUILD_FLAGS=-DMURMUR_LINK_DIAGNOSTICS` includes the diagnostic regression for 45 tests; both configurations run in CI. Python provisioning tests run with `python -m unittest discover -s src/python/tests -p test_murmur_key.py` from the repo root.
 
 The [encrypted CI workflow](.github/workflows/murmur.yml) compiles seven firmware targets with `MURMUR_ENCRYPT`, including both LilyGO bench roles; the upstream workflow exercises native tests and stock builds. Simulation does not replace over-the-air testing.
 
