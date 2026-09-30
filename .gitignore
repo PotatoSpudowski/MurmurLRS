@@ -9,6 +9,7 @@ src/data/*.ini
 src/data/*.json
 src/hardware
 venv/
+__pycache__/
 .context/
 benchmark/
 CLAUDE.md

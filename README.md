@@ -66,6 +66,24 @@ MurmurLRS: encryption enabled
 
 For command-line builds, set `MURMUR_BINDING_PHRASE` in the environment, then run PlatformIO from `src/`. Use `PLATFORMIO_BUILD_FLAGS` for regulatory settings, not the phrase. The generated key header stays in the ignored build directory; compiler flags and build logs do not contain the phrase or key.
 
+### Build a private TX/RX pair
+
+Use [tools/build_pair.py](tools/build_pair.py) to build both endpoints from the same committed revision. It requires explicit PlatformIO targets, matching hardware profiles, and a regulatory domain. Install PlatformIO in `venv/` and obtain the matching [ExpressLRS hardware definitions](https://github.com/ExpressLRS/targets) in `src/hardware/` first. For example, for a RadioMaster TX15 and BETAFPV 2.4 GHz AIO receiver:
+
+```bash
+python3 tools/build_pair.py \
+  --tx-target Unified_ESP32_LR1121_TX_via_ETX \
+  --tx-profile radiomaster.tx_dual.tx15 \
+  --rx-target Unified_ESP8285_2400_RX_via_WIFI \
+  --rx-profile betafpv.rx_2400.aio \
+  --domain ISM_2400 \
+  --output "$HOME/MurmurLRS-private/pair-001"
+```
+
+Supply `MURMUR_BINDING_PHRASE` through your local environment; optionally supply the separate `MURMUR_WIFI_PASSWORD`. Choose a domain permitted in your region and verify the profiles against your actual boards. The command builds in a temporary checkout, ignores local bench/diagnostic options, and never uploads or flashes anything. The private output contains TX/RX binaries, hardware layouts, the matching Lua script, build logs, and a manifest with the source revision and SHA-256 checksums. The manifest is written only after both builds succeed; a failed run may leave partial output for troubleshooting. Existing output directories are never overwritten.
+
+CI checks use public fixture credentials and verify compilation; they are not privately provisioned device builds. See [release policy](RELEASING.md) for the distinction between commits, builds, and releases.
+
 **Migration:** rebuild and flash both endpoints. Session-enabled firmware requires the new handshake on both TX and RX; it cannot exchange application packets with earlier MurmurLRS images. The full-phrase key format is incompatible with older UID-derived firmware, even for the same phrase. Changing the phrase in the device's WiFi UI changes ELRS binding settings but does not replace the compiled encryption key; rebuild both endpoints to change that key. Firmware images and build directories contain the key and must be treated as secret.
 
 **Wi-Fi management:** encrypted builds leave Wi-Fi management disabled unless a separate random 32-character hexadecimal `MURMUR_WIFI_PASSWORD` is provisioned in the build environment. When enabled, connect directly to the device's protected AP using that credential, then log in to the web interface as `admin` with the same credential. Home-network mode, firmware download, TCP/MSP bridging, and UDP joystick services are disabled in encrypted builds. Wired updates remain available. See [management access](src/lib/MurmurSession/README.md#wi-fi-management).
