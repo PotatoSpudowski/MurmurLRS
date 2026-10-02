@@ -582,23 +582,30 @@ void test_cleartext_sync_is_discovery_only()
 #if defined(MURMUR_LINK_DIAGNOSTICS)
 void test_diagnostics_preserve_authentication_and_replay_results()
 {
-    prepare(OTA4_PACKET_SIZE);
-    const auto before = MurmurGetDiagnostics();
-    TEST_ASSERT_TRUE(before.keysReady);
-    TEST_ASSERT_FALSE(before.epochLocked);
-    TEST_ASSERT_FALSE(receive(0, 10));
-    TEST_ASSERT_FALSE(receive(1, 11));
-    TEST_ASSERT_TRUE(receive(2, 12));
-    TEST_ASSERT_FALSE(receive(2, 12));
-    const auto after = MurmurGetDiagnostics();
-    TEST_ASSERT_EQUAL_UINT32(before.accepted + 1, after.accepted);
-    TEST_ASSERT_EQUAL_UINT32(before.rejected + 3, after.rejected);
-    TEST_ASSERT_TRUE(after.epochLocked);
-    MurmurResetCounter();
-    const auto reset = MurmurGetDiagnostics();
-    TEST_ASSERT_EQUAL_UINT32(after.resets + 1, reset.resets);
-    TEST_ASSERT_TRUE(reset.keysReady);
-    TEST_ASSERT_FALSE(reset.epochLocked);
+    for (uint8_t size : {OTA4_PACKET_SIZE, OTA8_PACKET_SIZE}) {
+        prepare(size);
+        const auto before = MurmurGetDiagnostics();
+        TEST_ASSERT_TRUE(before.keysReady);
+        TEST_ASSERT_FALSE(before.epochLocked);
+        TEST_ASSERT_FALSE(receive(0, 10));
+        TEST_ASSERT_FALSE(receive(1, 11));
+        TEST_ASSERT_TRUE(receive(2, 12));
+        TEST_ASSERT_FALSE(receive(2, 12));
+        const auto after = MurmurGetDiagnostics();
+        TEST_ASSERT_EQUAL_UINT32(before.accepted + 1, after.accepted);
+        TEST_ASSERT_EQUAL_UINT32(before.rejected + 3, after.rejected);
+        uint32_t wireHash = 2166136261U;
+        const auto *wire = reinterpret_cast<const uint8_t *>(&packets[2]);
+        for (unsigned i = 0; i < size; ++i)
+            wireHash = (wireHash ^ wire[i]) * 16777619U;
+        TEST_ASSERT_EQUAL_UINT32(wireHash, after.lastRejectedHash);
+        TEST_ASSERT_TRUE(after.epochLocked);
+        MurmurResetCounter();
+        const auto reset = MurmurGetDiagnostics();
+        TEST_ASSERT_EQUAL_UINT32(after.resets + 1, reset.resets);
+        TEST_ASSERT_TRUE(reset.keysReady);
+        TEST_ASSERT_FALSE(reset.epochLocked);
+    }
 }
 #endif
 

@@ -638,12 +638,12 @@ void RXEndpoint::updateParameters()
 #if defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
   const auto stats = MurmurGetDiagnostics();
   snprintf(murmurDiagnosticText, sizeof(murmurDiagnosticText),
-      "K:%u L:%u E:%lu/%lu OK:%lu FAIL:%lu MAX:%luus NEW:%lu RESET:%lu",
+      "K:%u L:%u E:%lu/%lu OK:%lu FAIL:%lu MAX:%luus NEW:%lu RESET:%lu RH:%08lx",
       unsigned(stats.keysReady), unsigned(stats.epochLocked),
       (unsigned long)stats.sendEpoch, (unsigned long)stats.receiveEpoch,
       (unsigned long)stats.accepted, (unsigned long)stats.rejected,
       (unsigned long)stats.maxValidationUs, (unsigned long)stats.installs,
-      (unsigned long)stats.resets);
+      (unsigned long)stats.resets, (unsigned long)stats.lastRejectedHash);
   MurmurFormatRxTiming(murmurTimingText, sizeof(murmurTimingText));
 #endif
   setTextSelectionValue(&luaSerialProtocol, config.GetSerialProtocol());

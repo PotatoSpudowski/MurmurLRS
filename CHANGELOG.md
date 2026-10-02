@@ -4,6 +4,7 @@ All notable changes to MurmurLRS are documented here.
 
 ## Unreleased
 
+- Add a rejected-packet fingerprint to optional receiver diagnostics so bench tests can check whether a transmitted packet reached the receiver.
 - Stop receiver radio and timer callbacks before encrypted ESP8285 firmware enters its UART bootloader.
 - Bound encrypted application-packet verification to two decryptions per call, prioritize learned counter/nonce candidates, and continue recovery searches across packets and disconnect resets. Retain authenticated replay history and three-match acquisition; add regressions for timer overshoot, nonce-offset wrap, search progress, recovery after a scan passes the peer during timing misalignment, and the verification budget.
 - Add an opt-in read-only receiver timing field with connection/timer state, nonce, hop index, authenticated-packet age, phase-detector offsets, and ESP8285 timer lateness.

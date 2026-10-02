@@ -209,6 +209,10 @@ authenticated application packet (`AGE`), and phase-detector offset/derivative
 (`PFD`). ESP8285 builds also report maximum timer callback lateness (`LATE`).
 These are diagnostic snapshots, not proof that control output is continuous.
 
+`RH` is the FNV-1a fingerprint of the wire bytes of the last rejected application
+packet. It helps correlate a bench transmission with a receiver rejection.
+It is not an authentication tag and does not identify the reason for rejection.
+
 From `src/`:
 
 ```

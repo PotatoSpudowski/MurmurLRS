@@ -225,6 +225,7 @@ void MurmurPoll(uint32_t now);
 struct MurmurDiagnostics {
     uint32_t accepted, rejected, maxValidationUs, installs, resets;
     uint32_t sendEpoch, receiveEpoch;
+    uint32_t lastRejectedHash;
     bool keysReady, epochLocked;
 };
 MurmurDiagnostics MurmurGetDiagnostics();
