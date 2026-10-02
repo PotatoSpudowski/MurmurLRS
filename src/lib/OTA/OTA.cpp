@@ -50,6 +50,22 @@ static uint8_t  murmur_lock_fail_count = 0;
 
 #if defined(MURMUR_LINK_DIAGNOSTICS)
 static MurmurDiagnostics murmur_diagnostics = {};
+static uint32_t ICACHE_RAM_ATTR MurmurWireHash(const OTA_Packet_s *packet)
+{
+    uint32_t hash = 2166136261U;
+    const auto *wire = reinterpret_cast<const uint8_t *>(packet);
+    for (unsigned i = 0; i < (OtaIsFullRes ? OTA8_PACKET_SIZE : OTA4_PACKET_SIZE); ++i)
+        hash = (hash ^ wire[i]) * 16777619U;
+    return hash;
+}
+void ICACHE_RAM_ATTR MurmurRecordSlotIgnored(const OTA_Packet_s *packet)
+{
+    const uint32_t hash = MurmurWireHash(packet);
+    MurmurLock lock;
+    ++murmur_diagnostics.slotIgnored;
+    murmur_diagnostics.lastSlotIgnoredHash = hash;
+}
+
 MurmurDiagnostics MurmurGetDiagnostics()
 {
     MurmurLock lock;
@@ -413,10 +429,7 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrc(OTA_Packet_s * const otaPktP
     const uint8_t type = otaPktPtr->std.type;
     const uint32_t start = micros();
     // Diagnostic correlation only: fingerprint the wire bytes before decrypting.
-    uint32_t wireHash = 2166136261U;
-    const auto *wire = reinterpret_cast<const uint8_t *>(otaPktPtr);
-    for (unsigned i = 0; i < (OtaIsFullRes ? OTA8_PACKET_SIZE : OTA4_PACKET_SIZE); ++i)
-        wireHash = (wireHash ^ wire[i]) * 16777619U;
+    const uint32_t wireHash = MurmurWireHash(otaPktPtr);
 #endif
     const bool accepted = MurmurValidatePacketCrcImpl(otaPktPtr);
 #if defined(MURMUR_LINK_DIAGNOSTICS)

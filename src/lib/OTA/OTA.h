@@ -226,9 +226,11 @@ struct MurmurDiagnostics {
     uint32_t accepted, rejected, maxValidationUs, installs, resets;
     uint32_t sendEpoch, receiveEpoch;
     uint32_t lastRejectedHash;
+    uint32_t slotIgnored, lastSlotIgnoredHash;
     bool keysReady, epochLocked;
 };
 MurmurDiagnostics MurmurGetDiagnostics();
+void MurmurRecordSlotIgnored(const OTA_Packet_s *packet);
 #endif
 bool MurmurSessionReady();
 bool MurmurHasAuthenticatedData();

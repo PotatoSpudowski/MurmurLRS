@@ -213,6 +213,11 @@ These are diagnostic snapshots, not proof that control output is continuous.
 packet. It helps correlate a bench transmission with a receiver rejection.
 It is not an authentication tag and does not identify the reason for rejection.
 
+The optional diagnostics also report `SKIP` and `SH` for radio packets ignored
+because their time slot already has accepted data. `SH` fingerprints the original
+wire bytes using the same diagnostic hash as `RH`. These packets do not enter
+authentication, so this count must not be treated as a MAC or replay-window rejection.
+
 From `src/`:
 
 ```

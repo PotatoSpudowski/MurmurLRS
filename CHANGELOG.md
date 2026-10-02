@@ -4,6 +4,8 @@ All notable changes to MurmurLRS are documented here.
 
 ## Unreleased
 
+- Distinguish authentication rejects from extra packets ignored after a time slot already has valid data in optional receiver diagnostics.
+
 ## v0.9.0 (2026-10-02)
 
 - Derive the master key from the complete binding phrase, independently of the public ELRS UID. Require a nonempty phrase and keep generated secrets out of compiler flags and build logs.

@@ -1280,6 +1280,10 @@ bool ICACHE_RAM_ATTR RXdoneISR(SX12xxDriverCommon::rx_status const status)
 {
     if (LQCalc.currentIsSet() && connectionState == connected)
     {
+#if defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
+        if (status == SX12xxDriverCommon::SX12XX_RX_OK)
+            MurmurRecordSlotIgnored(reinterpret_cast<const OTA_Packet_s *>(Radio.RXdataBuffer));
+#endif
         return false; // Already received a packet, do not run ProcessRFPacket() again.
     }
 

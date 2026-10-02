@@ -599,6 +599,16 @@ void test_diagnostics_preserve_authentication_and_replay_results()
         for (unsigned i = 0; i < size; ++i)
             wireHash = (wireHash ^ wire[i]) * 16777619U;
         TEST_ASSERT_EQUAL_UINT32(wireHash, after.lastRejectedHash);
+        const OTA_Packet_s unchanged = packets[2];
+        MurmurRecordSlotIgnored(&packets[2]);
+        const auto skipped = MurmurGetDiagnostics();
+        TEST_ASSERT_EQUAL_UINT32(after.slotIgnored + 1, skipped.slotIgnored);
+        TEST_ASSERT_EQUAL_UINT32(wireHash, skipped.lastSlotIgnoredHash);
+        TEST_ASSERT_EQUAL_UINT32(after.accepted, skipped.accepted);
+        TEST_ASSERT_EQUAL_UINT32(after.rejected, skipped.rejected);
+        TEST_ASSERT_EQUAL_MEMORY(&unchanged, &packets[2], size);
+        TEST_ASSERT_EQUAL(after.keysReady, skipped.keysReady);
+        TEST_ASSERT_EQUAL(after.epochLocked, skipped.epochLocked);
         TEST_ASSERT_TRUE(after.epochLocked);
         MurmurResetCounter();
         const auto reset = MurmurGetDiagnostics();
