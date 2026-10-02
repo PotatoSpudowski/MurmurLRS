@@ -4,36 +4,23 @@ All notable changes to MurmurLRS are documented here.
 
 ## Unreleased
 
-- Add a rejected-packet fingerprint to optional receiver diagnostics so bench tests can check whether a transmitted packet reached the receiver.
-- Stop receiver radio and timer callbacks before encrypted ESP8285 firmware enters its UART bootloader.
-- Bound encrypted application-packet verification to two decryptions per call, prioritize learned counter/nonce candidates, and continue recovery searches across packets and disconnect resets. Retain authenticated replay history and three-match acquisition; add regressions for timer overshoot, nonce-offset wrap, search progress, recovery after a scan passes the peer during timing misalignment, and the verification budget.
-- Add an opt-in read-only receiver timing field with connection/timer state, nonce, hop index, authenticated-packet age, phase-detector offsets, and ESP8285 timer lateness.
-- Add a private TX/RX pair builder with explicit board profiles, isolated source checkout, restricted output permissions, matching Lua script, and revision/checksum manifest. Add packaging regressions to CI and a manual source-release workflow gated on passing checks and numbered release notes.
-- Secure the Wi-Fi maintenance interface separately from the encrypted TX/RX radio link. Previously, unauthenticated firmware downloads could expose the compiled packet key; encrypted builds now block firmware export.
-- Require a separate build-time management password for the protected device hotspot and HTTP Basic login (`admin`). Authenticate requests before upload/configuration bodies reach their handlers, reject cross-origin requests, and disable home-network management and unauthenticated TCP/MSP and UDP joystick services.
-- Leave Wi-Fi management off unless `MURMUR_WIFI_PASSWORD` is provisioned; wired flashing remains available. The management password is separate from the binding phrase. This protects network access, but does not add HTTPS, firmware signing, or protection against physical flash extraction. Preserve stock-build behavior and add management/provisioning regressions.
-- Fix encrypted 2.4 GHz hopping between SX128x receivers and LR1121/LR2021 transmitters by assigning FHSS domain IDs by RF band rather than primary/secondary slot (`1766c1b8`).
-- Add opt-in receiver authentication, epoch, session, and validation-time diagnostics through a read-only CRSF info field. Refresh the snapshot on the first parameter chunk; omit instrumentation from normal builds (`fcc517e5`).
-- Exercise diagnostics in encrypted CI alongside the normal OTA tests (`1494c204`); the suite now includes 57 tests normally, 58 with diagnostics.
-- Clarify telemetry requirements for authenticated sessions.
+## v0.9.0 (2026-10-02)
 
-- Integrated the HMAC-SHA-256/HKDF session protocol into TX/RX, with boot-seeded challenges, directional traffic keys, bounded ISR mailboxes, and retry/reboot recovery. Application traffic waits for confirmation; hardware validation remains separate from host tests and build checks.
-- Preserve replay history across rate/connection changes, separate outgoing counters from receive synchronization, and stop traffic before counter exhaustion.
-- Require bidirectional telemetry in encrypted mode and add recovery-adapter and production OTA integration tests.
+- Derive the master key from the complete binding phrase, independently of the public ELRS UID. Require a nonempty phrase and keep generated secrets out of compiler flags and build logs.
+- Establish authenticated HMAC-SHA-256/HKDF sessions with fresh directional traffic keys. Hold application traffic until confirmation, preserve replay history across connection/rate changes, and stop traffic before counter exhaustion.
+- Limit encrypted packet verification to two decryptions per call and retain recovery-search progress across disconnects. Revisit missed counter epochs after timing corrections.
+- Fix secure 2.4 GHz hopping between SX128x receivers and LR1121/LR2021 transmitters by assigning domain IDs by RF band.
+- Protect Wi-Fi maintenance with an independent management credential. Block firmware export and unauthenticated TCP/MSP/UDP services in encrypted builds; preserve the stock configuration path.
+- Quiesce ESP8285 receiver radio/timer callbacks before entering its UART bootloader. Package compressed receiver images for wired and Wi-Fi updates.
+- Add optional receiver authentication, timing and rejected-packet diagnostics without exporting keys or channel payloads.
+- Add private paired firmware builds with explicit hardware profiles and revision/checksum manifests, plus CI-gated source releases.
+- Restore encrypted compilation, ESP8285 TX EEPROM initialization and classic ESP32 UART separation after upstream integration. Add LilyGO T3-S3 LR1121 targets and encrypted firmware coverage across seven configurations.
 
-- Derive firmware encryption keys from the complete build-time phrase rather than the six-byte ELRS UID. Both endpoints must be rebuilt; older encrypted firmware is incompatible.
-- Require a nonempty phrase for encrypted builds and keep generated key material out of compiler flags and build logs.
-- Track TX counter wraps on timer ticks, including periods with no transmitted packets.
-- Advance the TX epoch on rate/binding resets to avoid reusing counters within a running session. Session keys now change on authenticated boot/recovery handshakes, subject to fresh hardware entropy.
-- Reject repeated acquisition evidence and retain replay protection for acquisition packets through lock and relock.
-- Continue bounded acquisition searches beyond epoch 255 so late joins can find long-running transmitters.
-- Add CI tests against the production encrypted OTA hooks and build-time key provisioning.
+### Compatibility and verification
 
-- Fixed the duplicate `MurmurTrackNonce` definition that prevented encrypted firmware builds (#17).
-- Restored ESP8285 TX EEPROM initialization and separate backpack/USB UARTs on classic ESP32.
-- Added a dedicated CI workflow for crypto tests, production OTA/session tests, sanitizers, provisioning tests, and seven explicitly encrypted firmware builds.
-- Added experimental non-PA LilyGO T3-S3 LR1121 TX/RX bench targets, a checked-in 2.4 GHz hardware profile, and an optional TX free-run mode.
-- Documented the ExpressLRS 4.1.0-derived upstream base (#18), actual UID-based key derivation, short authentication tags, and session/nonce limitations.
+Rebuild both endpoints from this release with the same high-entropy binding phrase and use its Lua script. Earlier encrypted firmware is incompatible. Wi-Fi management requires a separate `MURMUR_WIFI_PASSWORD`; wired flashing remains available.
+
+Regression coverage includes 62 crypto/acquisition tests, 147 stock native tests, 57 encrypted integration tests (58 with diagnostics), provisioning/packaging checks and session-parser sanitizers. Disarmed hardware checks demonstrated restart and repeated 250/500 Hz recovery. Further hardware qualification is tracked in #22; the short tags, cleartext SYNC and lack of forward secrecy remain protocol limitations.
 
 ## v0.8 (2026-05-17)
 
