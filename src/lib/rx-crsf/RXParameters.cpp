@@ -16,6 +16,11 @@ static char murmurDiagnosticText[160];
 static stringParameter luaMurmurDiagnostics = {
     {"Murmur Diagnostics", CRSF_INFO}, murmurDiagnosticText
 };
+extern void MurmurFormatRxTiming(char *text, size_t size);
+static char murmurTimingText[128];
+static stringParameter luaMurmurTiming = {
+    {"Murmur Timing", CRSF_INFO}, murmurTimingText
+};
 #endif
 
 #define RX_HAS_SERIAL1 (GPIO_PIN_SERIAL1_TX != UNDEF_PIN || OPT_HAS_SERVO_OUTPUT)
@@ -616,6 +621,7 @@ void RXEndpoint::registerParameters()
   registerParameter(&luaELRSversion);
 #if defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
   registerParameter(&luaMurmurDiagnostics);
+  registerParameter(&luaMurmurTiming);
 #endif
 }
 
@@ -638,6 +644,7 @@ void RXEndpoint::updateParameters()
       (unsigned long)stats.accepted, (unsigned long)stats.rejected,
       (unsigned long)stats.maxValidationUs, (unsigned long)stats.installs,
       (unsigned long)stats.resets);
+  MurmurFormatRxTiming(murmurTimingText, sizeof(murmurTimingText));
 #endif
   setTextSelectionValue(&luaSerialProtocol, config.GetSerialProtocol());
 #if defined(PLATFORM_ESP32)

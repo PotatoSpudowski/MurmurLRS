@@ -37,9 +37,14 @@ static uint8_t  murmur_acquire_count = 0;
 static uint32_t murmur_acquire_epoch = 0;
 static murmur_replay_t murmur_acquire_replay;
 static uint32_t murmur_acquire_scan_pos = 0;
+static uint32_t murmur_acquire_revisit_pos = 0;
+static uint8_t murmur_revisit_nonce_offset = 0, murmur_nearby_step = 0;
+static uint8_t murmur_search_step = 0;
+static uint8_t murmur_candidate_nonce_offset = 0;
+static uint32_t murmur_acquire_clock_epoch = 0;
 static uint8_t  murmur_lock_fail_count = 0;
 #define MURMUR_ACQUIRE_THRESHOLD 3
-#define MURMUR_ACQUIRE_EPOCHS_PER_PACKET 16
+#define MURMUR_DECRYPT_ATTEMPTS_PER_PACKET 2
 #define MURMUR_LOCK_FAIL_MAX 16
 #define MURMUR_MAX_EPOCH 0xFFFFFFU
 
@@ -59,6 +64,8 @@ MurmurDiagnostics MurmurGetDiagnostics()
 
 #if defined(UNIT_TEST)
 void MurmurTestSetSendEpoch(uint32_t epoch) { murmur_send_epoch = epoch; }
+static uint8_t murmur_test_decrypt_attempts;
+uint8_t MurmurTestDecryptAttempts() { return murmur_test_decrypt_attempts; }
 #endif
 
 static ValidatePacketCrc_t OriginalValidateCrc;
@@ -99,6 +106,11 @@ void MurmurInstallSessionKeys(const uint8_t up[16], const uint8_t down[16])
     murmur_acquire_count = 0;
     murmur_acquire_epoch = 0;
     murmur_acquire_scan_pos = 0;
+    murmur_acquire_revisit_pos = 0;
+    murmur_revisit_nonce_offset = murmur_nearby_step = 0;
+    murmur_search_step = 0;
+    murmur_candidate_nonce_offset = 0;
+    murmur_acquire_clock_epoch = 0;
     murmur_lock_fail_count = 0;
     murmur_replay_init(&murmur_replay_state);
     murmur_replay_init(&murmur_acquire_replay);
@@ -169,7 +181,9 @@ void MurmurResetCounter()
     murmur_prev_nonce = OtaNonce;
     murmur_epoch_locked = false;
     murmur_acquire_count = 0;
-    murmur_acquire_scan_pos = murmur_nonce_epoch > 4 ? murmur_nonce_epoch - 4 : 0;
+    // Keep cooperative search progress across repeated disconnect/SYNC resets.
+    if (murmur_replay_state.initialized && murmur_acquire_scan_pos < (murmur_replay_state.highest >> 8))
+        murmur_acquire_scan_pos = murmur_replay_state.highest >> 8;
 }
 
 void ICACHE_RAM_ATTR MurmurTrackNonce()
@@ -284,116 +298,112 @@ static bool ICACHE_RAM_ATTR MurmurValidatePacketCrcImpl(OTA_Packet_s * const ota
     uint8_t nonce = OtaNonce;
     uint8_t direction = murmur_is_tx ? 1 : 0;
 
+    // Timer service on ESP8285 cannot tolerate a whole epoch search in one ISR.
+    // Spend at most two decryptions: the best hypothesis, then one cooperative
+    // probe. Only authenticated counters, never the speculative clock, anchor
+    // the fallback search's lower bound.
+    const uint32_t expected_epoch = murmur_epoch_locked
+        ? MurmurGetCounter() >> 8 : murmur_nonce_epoch;
+    const uint32_t trusted_epoch = murmur_replay_state.initialized
+        ? murmur_replay_state.highest >> 8 : 0;
+    if (murmur_acquire_scan_pos < trusted_epoch)
+        murmur_acquire_scan_pos = trusted_epoch;
+    uint32_t epoch = expected_epoch;
+    uint8_t candidate_nonce = nonce;
     if (murmur_epoch_locked) {
-        uint32_t counter = MurmurGetCounter();
-        uint32_t expected_epoch = counter >> 8;
-
-        /* Fast path: try expected epoch with primary nonce */
-        uint32_t candidate = (expected_epoch << 8) | (uint32_t)nonce;
-        if (murmur_decrypt_packet(murmur_receive_key, candidate, ad_header, direction,
-                                  payload, payload_len, received_mac, mac_bits)) {
-            if (!murmur_replay_check(&murmur_replay_state, candidate))
-                return false;
-            murmur_lock_fail_count = 0;
-            if (murmur_link) murmur_link->authenticated();
-            return true;
-        }
-
-        /* Outward spiral: ±1, ±2, ... ±4 epochs with primary nonce only */
-        for (uint32_t d = 1; d <= 4; d++) {
-            uint32_t epochs[2] = { expected_epoch + d,
-                                   (expected_epoch >= d) ? expected_epoch - d : 0xFFFFFFFF };
-            for (int e = 0; e < 2; e++) {
-                if (epochs[e] == 0xFFFFFFFF) continue;
-                candidate = (epochs[e] << 8) | (uint32_t)nonce;
-                if (murmur_decrypt_packet(murmur_receive_key, candidate, ad_header, direction,
-                                          payload, payload_len, received_mac, mac_bits)) {
-                    if (!murmur_replay_check(&murmur_replay_state, candidate))
-                        return false;
-                    murmur_nonce_epoch = epochs[e];
-                    murmur_prev_nonce = nonce;
-                    murmur_lock_fail_count = 0;
-                    if (murmur_link) murmur_link->authenticated();
-                    return true;
+        candidate_nonce = (uint8_t)(nonce - murmur_candidate_nonce_offset);
+        epoch -= nonce < murmur_candidate_nonce_offset && epoch > 0;
+    }
+    if (!murmur_epoch_locked && murmur_acquire_count) {
+        candidate_nonce = (uint8_t)(nonce - murmur_candidate_nonce_offset);
+        const uint32_t clock_epoch = expected_epoch -
+            (nonce < murmur_candidate_nonce_offset && expected_epoch > 0);
+        epoch = murmur_acquire_epoch + (clock_epoch - murmur_acquire_clock_epoch);
+    }
+#if defined(UNIT_TEST)
+    murmur_test_decrypt_attempts = 0;
+#endif
+    for (uint8_t attempt = 0; attempt < MURMUR_DECRYPT_ATTEMPTS_PER_PACKET; ++attempt) {
+        if (attempt) {
+            const uint8_t step = murmur_search_step++ & 7;
+            candidate_nonce = nonce;
+            if (step == 0)
+                epoch = expected_epoch + !(murmur_epoch_locked && murmur_candidate_nonce_offset);
+            else if (step == 4) {
+                // Revisit nearby estimates in both directions instead of
+                // depending on the forward scanner catching a moving peer.
+                const uint8_t nearby = murmur_nearby_step++ & 7;
+                const uint32_t distance = nearby / 2 + 1;
+                epoch = nearby & 1
+                    ? (expected_epoch >= distance ? expected_epoch - distance : 0)
+                    : expected_epoch + distance + 1;
+            }
+            else if (step == 1 || step == 5) {
+                candidate_nonce = (uint8_t)(nonce - 1);
+                epoch = expected_epoch - (nonce == 0 && expected_epoch > 0);
+            } else if (murmur_epoch_locked) {
+                epoch = expected_epoch ? expected_epoch - 1 : 0;
+            } else if (step == 2 || step == 6) {
+                // A wrong slot phase can make a scan pass the true epoch.
+                // Revisit a bounded window covering trusted history and the
+                // speculative estimate; keep a separate wide scan for gaps.
+                const uint32_t upper = std::min((uint32_t)MURMUR_MAX_EPOCH,
+                    std::max(expected_epoch + 8, trusted_epoch + 64));
+                if (murmur_acquire_revisit_pos < trusted_epoch ||
+                    murmur_acquire_revisit_pos > upper)
+                    murmur_acquire_revisit_pos = trusted_epoch;
+                epoch = murmur_acquire_revisit_pos;
+                candidate_nonce = (uint8_t)(nonce - murmur_revisit_nonce_offset);
+                if (murmur_revisit_nonce_offset) ++murmur_acquire_revisit_pos;
+                murmur_revisit_nonce_offset ^= 1;
+            } else {
+                epoch = murmur_acquire_scan_pos;
+                if (step == 7) {
+                    candidate_nonce = (uint8_t)(nonce - 1);
+                    if (++murmur_acquire_scan_pos > MURMUR_MAX_EPOCH)
+                        murmur_acquire_scan_pos = trusted_epoch;
                 }
             }
         }
-
-        /* Last resort: nonce-1 (PFD timer drift) */
-        uint8_t nonce_m1 = (uint8_t)(nonce - 1);
-        uint32_t nonce_m1_epoch = (nonce == 0 && expected_epoch > 0)
-                                  ? expected_epoch - 1 : expected_epoch;
-        candidate = (nonce_m1_epoch << 8) | (uint32_t)nonce_m1;
-        if (murmur_decrypt_packet(murmur_receive_key, candidate, ad_header, direction,
-                                  payload, payload_len, received_mac, mac_bits)) {
-            if (!murmur_replay_check(&murmur_replay_state, candidate))
-                return false;
-            murmur_nonce_epoch = nonce_m1_epoch;
-            murmur_prev_nonce = nonce_m1;
-            murmur_lock_fail_count = 0;
-            if (murmur_link) murmur_link->authenticated();
-            return true;
-        }
-
-        if (++murmur_lock_fail_count >= MURMUR_LOCK_FAIL_MAX) {
-            murmur_epoch_locked = false;
-            murmur_acquire_count = 0;
-            murmur_acquire_scan_pos = (murmur_nonce_epoch > 4) ? murmur_nonce_epoch - 4 : 0;
-            murmur_lock_fail_count = 0;
-        }
-        return false;
-    }
-
-    /* Acquisition mode: search epoch space to find TX's current epoch.
-     * Try nonce and nonce-1 (timer may not have converged yet after SYNC).
-     * Search MURMUR_ACQUIRE_EPOCHS_PER_PACKET epochs per call to bound ISR time,
-     * scanning forward from last known position (32-bit, no wrap masking).
-     * Require MURMUR_ACQUIRE_THRESHOLD consecutive matches at the same or next
-     * epoch before locking in, to avoid false accepts with truncated MACs. */
-    uint8_t nonces[2] = { nonce, (uint8_t)(nonce - 1) };
-    uint8_t nonce_count = 2;
-    uint32_t scan_start = murmur_acquire_scan_pos;
-
-    for (uint8_t i = 0; i < MURMUR_ACQUIRE_EPOCHS_PER_PACKET; i++) {
-        // Always revisit the last known neighborhood. A single corrupt packet
-        // must not move acquisition millions of epochs away from a fresh peer.
-        const uint32_t anchor = murmur_acquire_count ? murmur_acquire_epoch : murmur_nonce_epoch;
-        uint32_t epoch = i < 8 ? (anchor > 4 ? anchor - 4 : 0) + i : scan_start + i - 8;
         if (epoch > MURMUR_MAX_EPOCH) continue;
-        for (uint8_t n = 0; n < nonce_count; n++) {
-            uint32_t candidate = (epoch << 8) | (uint32_t)nonces[n];
-            if (murmur_decrypt_packet(murmur_receive_key, candidate, ad_header, direction,
-                                      payload, payload_len, received_mac, mac_bits)) {
-                if (!murmur_acquire_count ||
-                    (epoch != murmur_acquire_epoch && epoch != murmur_acquire_epoch + 1)) {
-                    murmur_acquire_count = 0;
-                    // Keep previously accepted counters protected on relock.
-                    // Trial matches must not poison the committed window.
-                    murmur_acquire_replay = murmur_replay_state;
-                }
-                if (!murmur_replay_check(&murmur_acquire_replay, candidate))
-                    return false;
-                murmur_acquire_epoch = epoch;
-                murmur_acquire_count++;
-
-                if (murmur_acquire_count >= MURMUR_ACQUIRE_THRESHOLD) {
-                    murmur_nonce_epoch = epoch;
-                    murmur_prev_nonce = nonces[n];
-                    murmur_epoch_locked = true;
-                    murmur_replay_state = murmur_acquire_replay;
-                    if (murmur_link) murmur_link->authenticated();
-                    return true;
-                }
-                murmur_acquire_scan_pos = epoch;
-                return false;
-            }
+        const uint32_t candidate = (epoch << 8) | candidate_nonce;
+#if defined(UNIT_TEST)
+        ++murmur_test_decrypt_attempts;
+#endif
+        if (!murmur_decrypt_packet(murmur_receive_key, candidate, ad_header, direction,
+                                  payload, payload_len, received_mac, mac_bits)) continue;
+        if (murmur_epoch_locked) {
+            if (!murmur_replay_check(&murmur_replay_state, candidate)) return false;
+            murmur_nonce_epoch = epoch;
+            murmur_prev_nonce = candidate_nonce;
+            murmur_candidate_nonce_offset = (uint8_t)(nonce - candidate_nonce);
+            murmur_lock_fail_count = 0;
+            if (murmur_link) murmur_link->authenticated();
+            return true;
         }
+        if (!murmur_acquire_count ||
+            (epoch != murmur_acquire_epoch && epoch != murmur_acquire_epoch + 1)) {
+            murmur_acquire_count = 0;
+            murmur_acquire_replay = murmur_replay_state;
+        }
+        if (!murmur_replay_check(&murmur_acquire_replay, candidate)) return false;
+        murmur_acquire_epoch = epoch;
+        murmur_candidate_nonce_offset = (uint8_t)(nonce - candidate_nonce);
+        murmur_acquire_clock_epoch = expected_epoch -
+            (nonce < murmur_candidate_nonce_offset && expected_epoch > 0);
+        if (++murmur_acquire_count < MURMUR_ACQUIRE_THRESHOLD) return false;
+        murmur_nonce_epoch = epoch;
+        murmur_prev_nonce = candidate_nonce;
+        murmur_epoch_locked = true;
+        murmur_lock_fail_count = 0;
+        murmur_replay_state = murmur_acquire_replay;
+        if (murmur_link) murmur_link->authenticated();
+        return true;
     }
-
     murmur_acquire_count = 0;
-    murmur_acquire_scan_pos = scan_start + MURMUR_ACQUIRE_EPOCHS_PER_PACKET / 2;
-    if (murmur_acquire_scan_pos > MURMUR_MAX_EPOCH) {
-        murmur_acquire_scan_pos = 0;
+    if (murmur_epoch_locked && ++murmur_lock_fail_count >= MURMUR_LOCK_FAIL_MAX) {
+        murmur_epoch_locked = false;
+        murmur_lock_fail_count = 0;
     }
     return false;
 }

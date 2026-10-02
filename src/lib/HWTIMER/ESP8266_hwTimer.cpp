@@ -17,6 +17,14 @@ static uint32_t NextTimeout;
 #define HWTIMER_TICKS_PER_US 5
 #define HWTIMER_PRESCALER (clockCyclesPerMicrosecond() / HWTIMER_TICKS_PER_US)
 
+#if defined(TARGET_RX) && defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
+static volatile uint32_t murmurMaxTimerLateCycles;
+uint32_t MurmurGetTimerMaxLateUs()
+{
+    return murmurMaxTimerLateCycles / clockCyclesPerMicrosecond();
+}
+#endif
+
 void hwTimer::init(void (*callbackTick)(), void (*callbackTock)())
 {
     hwTimer::callbackTick = callbackTick;
@@ -78,6 +86,11 @@ void ICACHE_RAM_ATTR hwTimer::callback()
 {
     if (running)
     {
+#if defined(TARGET_RX) && defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
+        const int32_t late = (int32_t)(ESP.getCycleCount() - NextTimeout);
+        if (late > 0 && (uint32_t)late > murmurMaxTimerLateCycles)
+            murmurMaxTimerLateCycles = (uint32_t)late;
+#endif
 #if defined(TARGET_TX)
         NextTimeout += HWtimerInterval;
         timer0_write(NextTimeout);

@@ -203,6 +203,12 @@ channel payload is exported. The timing instrumentation is absent when the
 flag is omitted. Run `native_murmur` with the same flag to include the
 diagnostic authentication/replay regression.
 
+The separate **Murmur Timing** field reports receiver connection state (`S`),
+timer lock state (`T`), current nonce (`N`), hop index (`H`), time since the last
+authenticated application packet (`AGE`), and phase-detector offset/derivative
+(`PFD`). ESP8285 builds also report maximum timer callback lateness (`LATE`).
+These are diagnostic snapshots, not proof that control output is continuous.
+
 From `src/`:
 
 ```

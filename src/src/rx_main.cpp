@@ -38,6 +38,9 @@
 #include "RXEndpoint.h"
 #include "RXOTAConnector.h"
 #include "rx-serial/devSerialIO.h"
+#if defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
+#include "MurmurLock.h"
+#endif
 
 #include <LittleFS.h>
 #if defined(PLATFORM_ESP8266)
@@ -172,6 +175,35 @@ static bool alreadyTLMresp = false;
 ///////Variables for Telemetry and Link Quality///////////////
 uint32_t LastValidPacket = 0;           //Time the last valid packet was recv
 uint32_t LastSyncPacket = 0;            //Time the last valid packet was recv
+
+#if defined(MURMUR_ENCRYPT) && defined(MURMUR_LINK_DIAGNOSTICS)
+void MurmurFormatRxTiming(char *text, size_t size)
+{
+    uint8_t state, timer, nonce, hop;
+    uint32_t age;
+    int32_t offset, derivative;
+    {
+        MurmurLock lock;
+        state = connectionState;
+        timer = RXtimerState;
+        nonce = OtaNonce;
+        hop = FHSSgetCurrIndex();
+        age = millis() - LastValidPacket;
+        offset = LPF_Offset.value();
+        derivative = LPF_OffsetDx.value();
+    }
+    snprintf(text, size, "S:%u T:%u N:%u H:%u AGE:%lums PFD:%ld/%ld",
+        unsigned(state), unsigned(timer), unsigned(nonce), unsigned(hop),
+        (unsigned long)age, (long)offset, (long)derivative);
+#if defined(PLATFORM_ESP8266)
+    extern uint32_t MurmurGetTimerMaxLateUs();
+    const size_t used = strlen(text);
+    if (used < size)
+        snprintf(text + used, size - used, " LATE:%luus",
+            (unsigned long)MurmurGetTimerMaxLateUs());
+#endif
+}
+#endif
 
 static uint32_t SendLinkStatstoFCintervalLastSent;
 static uint8_t SendLinkStatstoFCForcedSends;
@@ -2255,6 +2287,11 @@ struct bootloader {
 
 void reset_into_bootloader(void)
 {
+#if defined(PLATFORM_ESP8266) && defined(MURMUR_ENCRYPT)
+    // Radio/timer callbacks must not enter flash during the ROM handoff.
+    hwTimer::stop();
+    Radio.End();
+#endif
     SERIAL_PROTOCOL_TX.println((const char *)&target_name[4]);
     SERIAL_PROTOCOL_TX.flush();
 #if defined(PLATFORM_ESP8266)

@@ -126,7 +126,7 @@ make test
 
 The C suite contains 62 tests covering cipher vectors, packet authentication, replay checks, FHSSv2, acquisition, and simulated long-running sessions. The stock native PlatformIO suite contains 147 tests.
 
-`MURMUR_BINDING_PHRASE=ci-only-not-a-secret ../venv/bin/pio test -e native_murmur` (from `src/`) runs 52 tests exercising the production encrypted OTA hooks for both packet sizes, replay-resistant acquisition/relock, packet loss, tampering, nonce wrap, rate transitions, and late joins beyond epoch 255. It also tests session negotiation through the OTA hooks, independent reboots, entropy failure, counter exhaustion, bounded recovery mailboxes, and the Wi-Fi request guard. Adding `PLATFORMIO_BUILD_FLAGS=-DMURMUR_LINK_DIAGNOSTICS` includes the diagnostic regression for 53 tests; both configurations run in CI. The 13 Python provisioning tests run with `python -m unittest discover -s src/python/tests -p test_murmur_key.py` from the repo root.
+`MURMUR_BINDING_PHRASE=ci-only-not-a-secret ../venv/bin/pio test -e native_murmur` (from `src/`) runs 57 tests exercising the production encrypted OTA hooks for both packet sizes, replay-resistant acquisition/relock, packet loss, tampering, nonce wrap, rate transitions, and late joins beyond epoch 255. It also tests session negotiation through the OTA hooks, independent reboots, entropy failure, counter exhaustion, bounded recovery mailboxes, and the Wi-Fi request guard. Adding `PLATFORMIO_BUILD_FLAGS=-DMURMUR_LINK_DIAGNOSTICS` includes the diagnostic regression for 58 tests; both configurations run in CI. The 13 Python provisioning tests run with `python -m unittest discover -s src/python/tests -p test_murmur_key.py` from the repo root.
 
 The [encrypted CI workflow](.github/workflows/murmur.yml) compiles seven firmware targets with `MURMUR_ENCRYPT`, including both LilyGO bench roles; the upstream workflow exercises native tests and stock builds. Simulation does not replace over-the-air testing.
 
@@ -163,7 +163,7 @@ fhss_key -> ASCON-XOF("FHSSv1" || fhss_key || domain_id) -> hop sequence
 
 **Epoch acquisition:**
 
-The RX tries 16 candidate epochs per acquisition call and requires three consecutive matches before locking. The production scan wraps after a bounded range. Cold-start recovery at high TX epochs must be tested against the actual OTA implementation; standalone acquisition simulations are not sufficient evidence.
+Application-packet validation tries at most two counter candidates per call, prioritizing the expected or previously matched counter and continuing the wider search across packets. Acquisition requires three distinct consecutive matches before locking. Authenticated replay history anchors recovery independently of the speculative timer estimate, and disconnect resets preserve search progress. Distant unknown epochs take more packets to discover. Cold-start recovery at high TX epochs must be tested against the actual OTA implementation; standalone acquisition simulations are not sufficient evidence.
 
 </details>
 

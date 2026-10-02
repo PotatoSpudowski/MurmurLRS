@@ -4,6 +4,9 @@ All notable changes to MurmurLRS are documented here.
 
 ## Unreleased
 
+- Stop receiver radio and timer callbacks before encrypted ESP8285 firmware enters its UART bootloader.
+- Bound encrypted application-packet verification to two decryptions per call, prioritize learned counter/nonce candidates, and continue recovery searches across packets and disconnect resets. Retain authenticated replay history and three-match acquisition; add regressions for timer overshoot, nonce-offset wrap, search progress, recovery after a scan passes the peer during timing misalignment, and the verification budget.
+- Add an opt-in read-only receiver timing field with connection/timer state, nonce, hop index, authenticated-packet age, phase-detector offsets, and ESP8285 timer lateness.
 - Add a private TX/RX pair builder with explicit board profiles, isolated source checkout, restricted output permissions, matching Lua script, and revision/checksum manifest. Add packaging regressions to CI and a manual source-release workflow gated on passing checks and numbered release notes.
 - Secure the Wi-Fi maintenance interface separately from the encrypted TX/RX radio link. Previously, unauthenticated firmware downloads could expose the compiled packet key; encrypted builds now block firmware export.
 - Require a separate build-time management password for the protected device hotspot and HTTP Basic login (`admin`). Authenticate requests before upload/configuration bodies reach their handlers, reject cross-origin requests, and disable home-network management and unauthenticated TCP/MSP and UDP joystick services.
